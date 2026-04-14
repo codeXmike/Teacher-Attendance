@@ -1,0 +1,53 @@
+{
+  "name": "@attendance/electron",
+  "version": "1.0.0",
+  "description": "Teacher Attendance Platform - Electron Desktop App",
+  "author": "Your Name",
+  "private": true,
+  "main": "main.js",
+  
+  "build": {
+    "appId": "com.codexmike.attendance",
+    "productName": "Teacher Attendance",
+    "npmRebuild": false,
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "../web/dist/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]  
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "dependencies": {},
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development electron .",
+    "build": "npm run build:web && electron-builder",
+    "build:web": "cd ../web && npm run build && cd ../electron && mkdir -p dist && cp -r ../web/dist/* ./dist/",
+    "build:win": "npm run build:web && cross-env NODE_ENV=production electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "33.2.1",
+    "electron-builder": "^26.8.1"
+  }
+}
+
