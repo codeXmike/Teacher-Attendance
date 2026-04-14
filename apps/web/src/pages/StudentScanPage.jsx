@@ -49,7 +49,7 @@ export const StudentScanPage = () => {
         <div className="scan-meta">
           <span>Token present: {tokenFromUrl ? "Yes" : "No"}</span>
         </div>
-        <button onClick={submitAttendance} disabled={state.loading || !tokenFromUrl}>
+        <button className="btn btn-primary" onClick={submitAttendance} disabled={state.loading || !tokenFromUrl}>
           {state.loading ? "Submitting..." : "Record Attendance"}
         </button>
         {state.error ? <p className="error-text">{state.error}</p> : null}
