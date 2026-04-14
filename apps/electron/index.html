@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AttendEase</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <style>
+    .landing {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2rem;
+      background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
+    }
+    .landing h1 { font-size: 2.5rem; letter-spacing: -0.04em; }
+    .landing p  { color: var(--gray-500); max-width: 32rem; text-align: center; }
+    .landing-btns { display: flex; gap: 1rem; }
+  </style>
+</head>
+<body>
+  <main class="landing">
+    <div class="eyebrow">AttendEase</div>
+    <h1>Smart Attendance<br>Made Simple</h1>
+    <p>QR-based attendance tracking for lecturers and students. Start a session, share the code, done.</p>
+    <div class="landing-btns">
+      <a href="pages/lecturer-auth.html" class="btn btn-primary">Lecturer Access</a>
+      <a href="pages/student-auth.html"  class="btn btn-secondary">Student Access</a>
+    </div>
+  </main>
+</body>
+</html>

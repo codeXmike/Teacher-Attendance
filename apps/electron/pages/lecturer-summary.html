@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Attendance Summary · AttendEase</title>
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+  <div class="lecturer-shell" id="app">
+    <main class="lecturer-shell__main">
+      <div class="page-topbar">
+        <h1>Attendance Summary</h1>
+        <p class="muted">Track student attendance performance</p>
+      </div>
+      <div class="page-body">
+        <div id="banner" class="error-text" style="display:none"></div>
+
+        <!-- Header -->
+        <div class="summary-header">
+          <div class="field field--inline" style="display:flex;align-items:center;gap:0.5rem;flex:1">
+            <label class="field__label" style="margin:0;white-space:nowrap">Select Course</label>
+            <select class="field__select" id="course-select" onchange="onCourseChange()" style="min-width:200px">
+              <option value="">Choose a course…</option>
+            </select>
+          </div>
+          <div class="summary-stats" id="stats-row" style="display:none">
+            <div class="summary-stat">
+              <span class="summary-stat__label">Total Students</span>
+              <span class="summary-stat__value" id="stat-students">0</span>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat__label">Total Sessions</span>
+              <span class="summary-stat__value" id="stat-sessions">0</span>
+            </div>
+            <div class="summary-stat">
+              <span class="summary-stat__label">Avg Attendance</span>
+              <span class="summary-stat__value" id="stat-avg">0<span class="summary-stat__unit">%</span></span>
+            </div>
+            <button class="summary-export-btn" onclick="exportCSV()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Export CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Content area -->
+        <div id="content">
+          <div class="empty-summary card">
+            <div class="empty-summary__icon">📊</div>
+            <p>Select a course to view attendance summary</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="../assets/auth.js"></script>
+  <script>
+    const user  = requireAuth("lecturer");
+    const token = getToken();
+    let courses = [], summaryData = [], selectedCourse = null;
+
+    document.getElementById("app").insertAdjacentHTML("afterbegin", renderSidebar("summary"));
+
+    async function boot() {
+      try {
+        courses = await apiRequest("/courses", { token });
+        courses.sort((a,b) => a.courseCode.localeCompare(b.courseCode));
+        const sel = document.getElementById("course-select");
+        courses.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c._id; opt.textContent = `${c.courseCode} — ${c.courseTitle}`;
+          sel.appendChild(opt);
+        });
+      } catch (err) { showBanner(err.message); }
+    }
+
+    async function onCourseChange() {
+      const id = document.getElementById("course-select").value;
+      selectedCourse = courses.find(c => c._id === id) || null;
+      if (!id) {
+        summaryData = [];
+        document.getElementById("stats-row").style.display = "none";
+        document.getElementById("content").innerHTML = `<div class="empty-summary card"><div class="empty-summary__icon">📊</div><p>Select a course to view attendance summary</p></div>`;
+        return;
+      }
+      document.getElementById("content").innerHTML = `<div class="empty-summary card"><div class="empty-summary__icon">⏳</div><p>Loading attendance data…</p></div>`;
+      try {
+        const data = await apiRequest(`/attendance/summary/${id}`, { token });
+        summaryData = data.students || [];
+        document.getElementById("stat-students").textContent = data.totalStudents || 0;
+        document.getElementById("stat-sessions").textContent = summaryData[0]?.totalSessions || 0;
+        document.getElementById("stat-avg").innerHTML = `${Math.round(data.averageAttendance || 0)}<span class="summary-stat__unit">%</span>`;
+        document.getElementById("stats-row").style.display = summaryData.length ? "flex" : "none";
+        renderTable();
+        showBanner("");
+      } catch (err) { showBanner(err.message); }
+    }
+
+    function calcAttendance(presentCount, totalSessions) {
+      if (!totalSessions) return { percentage:0, fractionDisplay:"0/5", presentCount:0, totalSessions:0 };
+      const p = Number(presentCount)||0, t = Number(totalSessions)||0;
+      const pct  = (p/t)*100;
+      const frac = (p/t)*5;
+      return { percentage: Math.round(pct), fractionDisplay:`${frac.toFixed(1)}/5`, presentCount:p, totalSessions:t };
+    }
+
+    function percentClass(pct) { return pct>=75?"high":pct>=50?"medium":"low"; }
+
+    function renderTable() {
+      if (!summaryData.length) {
+        document.getElementById("content").innerHTML = `<div class="empty-summary card"><div class="empty-summary__icon">📭</div><p>No students found for this course</p><p class="muted">Students need to register for this course to see attendance data</p></div>`;
+        return;
+      }
+      document.getElementById("content").innerHTML = `
+        <div class="summary-table-container">
+          <table class="summary-table">
+            <thead><tr><th>Student</th><th>Attendance</th><th>Score (out of 5)</th><th>Progress</th></tr></thead>
+            <tbody>${summaryData.map(s => {
+              const { percentage, fractionDisplay, presentCount, totalSessions } = calcAttendance(s.presentCount, s.totalSessions);
+              const cls = percentClass(percentage);
+              return `<tr>
+                <td><div class="student-name">${s.name}</div><div class="student-matric">${s.matricNo}</div></td>
+                <td>
+                  <span class="attendance-percent ${cls}">${percentage}%</span>
+                  <div style="font-size:0.75rem;color:var(--gray-500);margin-top:0.25rem">${presentCount} / ${totalSessions} sessions</div>
+                </td>
+                <td><div class="attendance-fraction">${fractionDisplay}</div></td>
+                <td style="min-width:150px">
+                  <div class="progress-bar-container"><div class="progress-bar ${cls}" style="width:${percentage}%"></div></div>
+                  <div style="font-size:0.75rem;color:var(--gray-500);margin-top:0.25rem;text-align:right">${percentage}% complete</div>
+                </td>
+              </tr>`;
+            }).join("")}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function exportCSV() {
+      if (!summaryData.length) return;
+      const headers = ["Student Name","Matric Number","Attendance Percentage","Attendance (out of 5)","Present Count","Total Sessions"];
+      const rows = summaryData.map(s => {
+        const { percentage, fractionDisplay, presentCount, totalSessions } = calcAttendance(s.presentCount, s.totalSessions);
+        return [`"${s.name}"`,`"${s.matricNo}"`,`${percentage}%`,fractionDisplay,presentCount,totalSessions];
+      });
+      const csv  = [headers,...rows].map(r=>r.join(",")).join("\n");
+      const blob = new Blob([csv],{type:"text/csv;charset=utf-8;"});
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url; a.download = `${selectedCourse?.courseCode||"course"}_attendance_summary.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+
+    boot();
+  </script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Records · AttendEase</title>
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+  <div class="lecturer-shell" id="app">
+    <main class="lecturer-shell__main">
+      <div class="page-topbar"><h1>Records</h1></div>
+      <div class="page-body">
+        <div id="banner" class="error-text" style="display:none"></div>
+
+        <!-- Filter bar -->
+        <div class="records-bar" style="margin-bottom:1.5rem">
+          <div class="field field--inline" style="display:flex;align-items:center;gap:0.5rem">
+            <label class="field__label" style="margin:0;white-space:nowrap">Filter by course</label>
+            <select class="field__select" id="course-select" onchange="onCourseChange()">
+              <option value="">All courses</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="records-grid">
+          <!-- Session list -->
+          <div class="pane pane--list">
+            <div class="pane__head">
+              <span class="pane__title">Sessions</span>
+              <span class="badge" id="session-count">0</span>
+            </div>
+            <div class="session-list" id="session-list">
+              <p class="empty-hint">No sessions found.</p>
+            </div>
+          </div>
+
+          <!-- Records table -->
+          <div class="pane pane--table">
+            <div class="pane__head">
+              <span class="pane__title" id="table-title">Students</span>
+              <span class="badge" id="record-count">0</span>
+            </div>
+
+            <!-- Manual add -->
+            <div id="manual-add-area" style="display:none;padding:12px;border-bottom:1px solid var(--gray-200);position:relative">
+              <label style="display:block;margin-bottom:8px;font-size:12px;color:#666">Add student to this session</label>
+              <div style="display:flex;gap:8px">
+                <input type="text" id="student-search" placeholder="Search by name or matric no…"
+                       oninput="searchStudents(this.value)"
+                       style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:4px;font-size:14px" />
+                <button onclick="clearSearch()" style="background:none;border:none;cursor:pointer;color:#999;font-size:18px">✕</button>
+              </div>
+              <div id="student-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid var(--gray-300);border-top:none;max-height:200px;overflow-y:auto;z-index:10;margin:0 12px"></div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="att-table">
+                <thead><tr><th>Name</th><th>Reg no.</th><th>Time</th><th style="width:50px"></th></tr></thead>
+                <tbody id="record-body"></tbody>
+              </table>
+              <p class="empty-hint" id="record-empty">Select a session to view records.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="../assets/auth.js"></script>
+  <script>
+    const user  = requireAuth("lecturer");
+    const token = getToken();
+    let courses = [], sessions = [], selectedCourseId = "", selectedSessionId = "", records = [];
+    let searchDebounce = null;
+
+    document.getElementById("app").insertAdjacentHTML("afterbegin", renderSidebar("records"));
+
+    async function boot() {
+      try {
+        courses = await apiRequest("/courses", { token });
+        courses.sort((a,b) => a.courseCode.localeCompare(b.courseCode));
+        const sel = document.getElementById("course-select");
+        courses.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c._id; opt.textContent = `${c.courseCode} — ${c.courseTitle}`;
+          sel.appendChild(opt);
+        });
+        await loadSessions();
+      } catch (err) { showBanner(err.message); }
+    }
+
+    async function onCourseChange() {
+      selectedCourseId = document.getElementById("course-select").value;
+      await loadSessions();
+    }
+
+    async function loadSessions() {
+      try {
+        const query = selectedCourseId ? `?courseId=${selectedCourseId}` : "";
+        sessions = await apiRequest(`/session${query}`, { token });
+        document.getElementById("session-count").textContent = sessions.length;
+        const list = document.getElementById("session-list");
+        if (!sessions.length) { list.innerHTML = '<p class="empty-hint">No sessions found.</p>'; return; }
+        // Keep selected if still valid
+        if (!sessions.some(s => s.id === selectedSessionId)) selectedSessionId = sessions[0]?.id || "";
+        renderSessionList();
+        if (selectedSessionId) await loadRecords();
+      } catch (err) { showBanner(err.message); }
+    }
+
+    function renderSessionList() {
+      document.getElementById("session-list").innerHTML = sessions.map(s => `
+        <button class="session-row ${selectedSessionId === s.id ? "session-row--active" : ""}"
+                onclick="selectSession('${s.id}')">
+          <span class="session-row__code">${s.course?.courseCode || "—"}</span>
+          <span class="session-row__date">${new Date(s.createdAt).toLocaleString()}</span>
+          <span class="session-row__count">${s.attendanceCount} students</span>
+        </button>
+      `).join("");
+    }
+
+    async function selectSession(id) {
+      selectedSessionId = id;
+      renderSessionList();
+      await loadRecords();
+    }
+
+    async function loadRecords() {
+      if (!selectedSessionId) { records = []; renderRecords(); return; }
+      try {
+        const data = await apiRequest(`/attendance/session/${selectedSessionId}`, { token });
+        records = data.rows;
+        const sess = sessions.find(s => s.id === selectedSessionId);
+        document.getElementById("table-title").textContent = sess
+          ? `${sess.course?.courseCode} · ${new Date(sess.createdAt).toLocaleDateString()}`
+          : "Students";
+        renderRecords();
+        document.getElementById("manual-add-area").style.display = "block";
+        showBanner("");
+      } catch (err) { showBanner(err.message); }
+    }
+
+    function renderRecords() {
+      const tbody = document.getElementById("record-body");
+      const empty = document.getElementById("record-empty");
+      document.getElementById("record-count").textContent = records.length;
+      if (!records.length) {
+        tbody.innerHTML = "";
+        empty.textContent = selectedSessionId ? "No records for this session." : "Select a session to view records.";
+        empty.style.display = "block";
+        return;
+      }
+      empty.style.display = "none";
+      tbody.innerHTML = records.map(r => `
+        <tr>
+          <td>${r.student.name}</td>
+          <td class="mono">${r.student.matricNo}</td>
+          <td class="mono">${new Date(r.timestamp).toLocaleTimeString()}</td>
+          <td style="text-align:center">
+            <button onclick="deleteRecord('${r.id}')" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:18px">🗑</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function deleteRecord(id) {
+      try {
+        await apiRequest(`/attendance/${id}`, { method:"DELETE", token });
+        records = records.filter(r => r.id !== id);
+        renderRecords();
+      } catch (err) { showBanner(err.message); }
+    }
+
+    // Manual add
+    function searchStudents(query) {
+      clearTimeout(searchDebounce);
+      if (!query.trim() || !selectedSessionId) { document.getElementById("student-dropdown").style.display="none"; return; }
+      searchDebounce = setTimeout(async () => {
+        try {
+          const data = await apiRequest(`/attendance/available/students?sessionId=${selectedSessionId}&searchQuery=${encodeURIComponent(query)}`, { token });
+          const dd = document.getElementById("student-dropdown");
+          if (!data.length) { dd.style.display="none"; return; }
+          dd.innerHTML = data.map(s => `
+            <div style="padding:10px 12px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
+              <div><div style="font-weight:500;font-size:14px">${s.name}</div><div style="font-size:12px;color:#666">${s.matricNo}</div></div>
+              <button onclick="addManually('${s._id}')" style="padding:4px 8px;background:#2563eb;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px">Add</button>
+            </div>
+          `).join("");
+          dd.style.display = "block";
+        } catch {}
+      }, 300);
+    }
+
+    async function addManually(studentId) {
+      try {
+        await apiRequest("/attendance/manual", { method:"POST", token, body:{ sessionId: selectedSessionId, studentId } });
+        clearSearch();
+        await loadRecords();
+        showBanner("");
+      } catch (err) { showBanner(err.message); }
+    }
+
+    function clearSearch() {
+      document.getElementById("student-search").value = "";
+      document.getElementById("student-dropdown").style.display = "none";
+    }
+
+    boot();
+  </script>
+</body>
+</html>

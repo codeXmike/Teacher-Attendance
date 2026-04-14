@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Courses · AttendEase</title>
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+  <div class="lecturer-shell" id="app">
+    <!-- sidebar injected by JS -->
+    <main class="lecturer-shell__main">
+      <div class="page-topbar">
+        <h1>Courses</h1>
+      </div>
+      <div class="page-body">
+        <div id="banner" class="error-text" style="display:none"></div>
+        <div class="page-courses">
+          <!-- Course list -->
+          <div class="pane pane--list">
+            <div class="pane__head">
+              <span class="pane__title">All courses</span>
+              <span class="badge" id="course-count">0</span>
+            </div>
+            <div class="course-list" id="course-list">
+              <p class="empty-hint">No courses yet. Add one →</p>
+            </div>
+          </div>
+
+          <!-- Right pane stack -->
+          <div class="pane-stack">
+            <div class="pane">
+              <div class="pane__head"><span class="pane__title">New course</span></div>
+              <form class="form-block" id="create-form" onsubmit="createCourse(event)" style="padding:1.25rem;display:flex;flex-direction:column;gap:1rem">
+                <div class="field">
+                  <label class="field__label">Course code</label>
+                  <input class="field__input" id="input-code" placeholder="CSC 401" required />
+                </div>
+                <div class="field">
+                  <label class="field__label">Course title</label>
+                  <input class="field__input" id="input-title" placeholder="Distributed Systems" required />
+                </div>
+                <button class="btn btn-primary" type="submit" id="save-btn">Save course</button>
+              </form>
+            </div>
+
+            <div class="pane" id="selected-pane" style="display:none">
+              <div class="pane__head"><span class="pane__title">Selected</span></div>
+              <div class="course-detail" style="padding:1.25rem">
+                <span class="course-detail__code" id="sel-code"></span>
+                <span class="course-detail__title" id="sel-title" style="color:var(--gray-500);display:block;margin-top:0.25rem"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="../assets/auth.js"></script>
+  <script>
+    const user  = requireAuth("lecturer");
+    const token = getToken();
+    let courses = [];
+    let selectedId = null;
+
+    // Inject sidebar
+    document.getElementById("app").insertAdjacentHTML("afterbegin", renderSidebar("courses"));
+
+    async function loadCourses() {
+      try {
+        courses = await apiRequest("/courses", { token });
+        courses.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
+        renderList();
+      } catch (err) { showBanner(err.message); }
+    }
+
+    function renderList() {
+      const list = document.getElementById("course-list");
+      document.getElementById("course-count").textContent = courses.length;
+      if (!courses.length) {
+        list.innerHTML = '<p class="empty-hint">No courses yet. Add one →</p>';
+        return;
+      }
+      list.innerHTML = courses.map(c => `
+        <button class="course-row ${selectedId === c._id ? "course-row--active" : ""}"
+                onclick="selectCourse('${c._id}')">
+          <span class="course-row__code">${c.courseCode}</span>
+          <span class="course-row__title">${c.courseTitle}</span>
+        </button>
+      `).join("");
+
+      const sel = courses.find(c => c._id === selectedId);
+      if (sel) {
+        document.getElementById("selected-pane").style.display = "block";
+        document.getElementById("sel-code").textContent  = sel.courseCode;
+        document.getElementById("sel-title").textContent = sel.courseTitle;
+      } else {
+        document.getElementById("selected-pane").style.display = "none";
+      }
+    }
+
+    function selectCourse(id) {
+      selectedId = id;
+      renderList();
+    }
+
+    async function createCourse(e) {
+      e.preventDefault();
+      const btn = document.getElementById("save-btn");
+      btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        const course = await apiRequest("/courses", {
+          method: "POST", token,
+          body: {
+            courseCode:  document.getElementById("input-code").value,
+            courseTitle: document.getElementById("input-title").value,
+          }
+        });
+        courses.push(course);
+        courses.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
+        selectedId = course._id;
+        document.getElementById("input-code").value  = "";
+        document.getElementById("input-title").value = "";
+        renderList();
+        showBanner("", "success");
+      } catch (err) { showBanner(err.message); }
+      finally { btn.disabled = false; btn.textContent = "Save course"; }
+    }
+
+    loadCourses();
+  </script>
+</body>
+</html>

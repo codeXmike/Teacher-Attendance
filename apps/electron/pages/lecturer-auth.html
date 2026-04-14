@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lecturer Login · AttendEase</title>
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="shell__masthead">
+      <a href="../index.html" class="shell__brand">AttendEase</a>
+      <div class="shell__switch">
+        <span>Student?</span>
+        <a href="student-auth.html">Open student access</a>
+      </div>
+    </header>
+
+    <div class="auth-panel">
+      <div class="section-head">
+        <h1>Lecturer Access</h1>
+      </div>
+
+      <!-- Logged-in banner (shown when already authenticated) -->
+      <div id="already-logged-in" style="display:none;margin-bottom:20px;padding:12px;background:#f0f9ff;border-radius:6px;text-align:center">
+        <p style="margin:0 0 12px 0;font-size:14px;color:#666">
+          Currently logged in as:<br>
+          <strong id="logged-in-name"></strong> · <span id="logged-in-email"></span>
+        </p>
+        <button onclick="switchAccount()" style="background:#ef4444;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px">
+          Logout &amp; Switch Account
+        </button>
+      </div>
+
+      <!-- Mode toggle -->
+      <div class="mode-toggle">
+        <button id="btn-login"    class="toggle-active" onclick="setMode('login')">Login</button>
+        <button id="btn-register"                       onclick="setMode('register')">Register</button>
+      </div>
+
+      <div id="error-msg" class="error-text" style="display:none"></div>
+
+      <form class="auth-form" id="auth-form" onsubmit="submit(event)">
+        <div id="name-field" style="display:none">
+          <label><span>Name</span>
+            <input id="input-name" type="text" autocomplete="name" />
+          </label>
+        </div>
+        <label><span>Email</span>
+          <input id="input-email" type="email" autocomplete="email" required />
+        </label>
+        <label><span>Password</span>
+          <div class="password-field">
+            <input id="input-password" type="password" autocomplete="current-password" required />
+            <button type="button" class="password-toggle" onclick="togglePw()">Show</button>
+          </div>
+        </label>
+        <button type="submit" id="submit-btn" class="btn btn-primary" style="width:100%;justify-content:center">Login</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="../assets/auth.js"></script>
+  <script>
+    let mode = "login";
+
+    // Check if already logged in
+    (function() {
+      const user = getUser();
+      if (user && user.role === "lecturer") {
+        document.getElementById("already-logged-in").style.display = "block";
+        document.getElementById("logged-in-name").textContent  = user.name;
+        document.getElementById("logged-in-email").textContent = user.email;
+      }
+    })();
+
+    function setMode(m) {
+      mode = m;
+      document.getElementById("name-field").style.display = m === "register" ? "block" : "none";
+      document.getElementById("btn-login").classList.toggle("toggle-active",    m === "login");
+      document.getElementById("btn-register").classList.toggle("toggle-active", m === "register");
+      document.getElementById("submit-btn").textContent = m === "login" ? "Login" : "Create Lecturer Workspace";
+    }
+
+    function togglePw() {
+      const input = document.getElementById("input-password");
+      const btn   = document.querySelector(".password-toggle");
+      const show  = input.type === "password";
+      input.type  = show ? "text" : "password";
+      btn.textContent = show ? "Hide" : "Show";
+    }
+
+    async function submit(e) {
+      e.preventDefault();
+      const errEl = document.getElementById("error-msg");
+      const btn   = document.getElementById("submit-btn");
+      errEl.style.display = "none";
+      btn.disabled = true;
+      btn.textContent = "Processing...";
+
+      try {
+        const body = {
+          email:    document.getElementById("input-email").value,
+          password: document.getElementById("input-password").value,
+          role:     "lecturer",
+        };
+        if (mode === "register") body.name = document.getElementById("input-name").value;
+
+        const payload = await apiRequest(`/auth/${mode}`, { method: "POST", body });
+        saveAuth(payload);
+        window.location.href = "lecturer-dashboard.html";
+      } catch (err) {
+        errEl.textContent    = err.message;
+        errEl.style.display  = "block";
+        btn.disabled         = false;
+        btn.textContent      = mode === "login" ? "Login" : "Create Lecturer Workspace";
+      }
+    }
+
+    function switchAccount() {
+      clearAuth();
+      document.getElementById("already-logged-in").style.display = "none";
+    }
+  </script>
+</body>
+</html>

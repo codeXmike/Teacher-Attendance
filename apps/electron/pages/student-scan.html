@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mark Attendance · AttendEase</title>
+  <link rel="stylesheet" href="../assets/style.css" />
+  <style>
+    .scan-shell {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
+    }
+    .scan-body {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .scan-card {
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-lg);
+      padding: 2.5rem;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+    }
+    .scan-icon { font-size: 3rem; margin-bottom: 1rem; }
+    .scan-card h2 { margin-bottom: 0.5rem; }
+    .scan-card p  { color: var(--gray-500); margin-bottom: 1.5rem; }
+    .success-icon { color: var(--success); font-size: 4rem; margin-bottom: 1rem; }
+    .error-icon   { color: var(--danger);  font-size: 4rem; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="scan-shell">
+    <header class="shell__masthead">
+      <a href="../index.html" class="shell__brand">AttendEase</a>
+      <div class="shell__switch" id="user-info"></div>
+    </header>
+
+    <div class="scan-body">
+      <div class="scan-card" id="scan-card">
+        <div class="scan-icon">⏳</div>
+        <h2>Checking session…</h2>
+        <p>Please wait</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../assets/auth.js"></script>
+  <script>
+    const token = new URLSearchParams(window.location.search).get("token");
+    const user  = getUser();
+    const authToken = getToken();
+
+    // Show user info in header
+    if (user) {
+      document.getElementById("user-info").innerHTML = `
+        <span style="color:var(--gray-600)">${user.name}</span>
+        <button onclick="doLogout()" style="color:var(--danger);background:none;border:none;cursor:pointer;font-size:0.875rem">Logout</button>
+      `;
+    } else {
+      document.getElementById("user-info").innerHTML = `<a href="student-auth.html${token?'?token='+token:''}" style="color:var(--primary)">Login / Register</a>`;
+    }
+
+    function doLogout() {
+      clearAuth();
+      window.location.href = `student-auth.html${token?'?token='+token:''}`;
+    }
+
+    function showState(icon, title, body, btnLabel, btnHref) {
+      document.getElementById("scan-card").innerHTML = `
+        <div>${icon}</div>
+        <h2>${title}</h2>
+        <p>${body}</p>
+        ${btnLabel ? `<a href="${btnHref}" class="btn btn-primary" style="margin-top:1rem">${btnLabel}</a>` : ""}
+      `;
+    }
+
+    async function run() {
+      if (!token) { showState("❌","No token","This page requires a valid QR scan link.","",""); return; }
+
+      if (!user || user.role !== "student") {
+        showState("🔐","Login required","Please log in or register as a student to mark attendance.","Login / Register",`student-auth.html?token=${token}`);
+        return;
+      }
+
+      try {
+        await apiRequest("/attendance/scan", { method:"POST", token: authToken, body:{ sessionToken: token } });
+        showState('<div class="success-icon">✓</div>',"Attendance Marked!",`Welcome, ${user.name}. Your attendance has been recorded.`,"","");
+      } catch (err) {
+        const msg = err.message || "Failed to mark attendance.";
+        if (msg.toLowerCase().includes("already")) {
+          showState('<div class="success-icon">✓</div>',"Already Checked In",`${user.name}, you have already been checked in for this session.`,"","");
+        } else {
+          showState('<div class="error-icon">✕</div>',"Failed",msg,"Try Again","");
+        }
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

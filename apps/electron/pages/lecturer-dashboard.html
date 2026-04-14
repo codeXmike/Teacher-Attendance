@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Session · AttendEase</title>
+  <link rel="stylesheet" href="../assets/style.css" />
+  <!-- QR code library (vanilla JS) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Socket.IO client -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    .qr-frame { background:var(--gray-900);padding:1rem;border-radius:var(--radius);display:inline-block; }
+    .qr-body  { padding:1.5rem;display:flex;flex-direction:column;align-items:center;gap:1rem; }
+    .qr-empty { text-align:center;padding:2rem; }
+    .qr-empty__icon { font-size:3rem;opacity:0.3;margin-bottom:1rem; }
+    .badge--live { background:var(--success);color:white;animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.7} }
+  </style>
+</head>
+<body>
+  <div class="lecturer-shell" id="app">
+    <main class="lecturer-shell__main">
+      <div class="page-topbar"><h1>Live Session</h1></div>
+      <div class="page-body">
+        <div id="banner" class="error-text" style="display:none"></div>
+
+        <!-- Toolbar -->
+        <div class="dash-toolbar" style="display:flex;gap:1rem;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap">
+          <div class="field field--inline" style="display:flex;align-items:center;gap:0.5rem">
+            <label class="field__label" style="margin:0;white-space:nowrap">Course</label>
+            <select class="field__select" id="course-select" onchange="onCourseChange()">
+              <option value="">Select a course…</option>
+            </select>
+          </div>
+          <div style="margin-left:auto">
+            <button id="session-btn" class="btn btn-primary" onclick="toggleSession()">Start session</button>
+          </div>
+        </div>
+
+        <!-- Grid -->
+        <div class="dash-grid" style="display:grid;grid-template-columns:340px 1fr;gap:1.5rem">
+          <!-- QR Pane -->
+          <div class="pane pane--qr">
+            <div class="pane__head">
+              <span class="pane__title">QR Code</span>
+              <span class="badge" id="live-badge" style="display:none">● LIVE</span>
+            </div>
+            <div class="qr-body" id="qr-body">
+              <div class="qr-empty">
+                <div class="qr-empty__icon">📡</div>
+                <p>Start a session to generate a QR code</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Attendance Pane -->
+          <div class="pane pane--table">
+            <div class="pane__head">
+              <span class="pane__title">Check-ins</span>
+              <span class="badge" id="checkin-count">0</span>
+            </div>
+
+            <!-- Manual add -->
+            <div id="manual-add-area" style="display:none;padding:12px;border-bottom:1px solid var(--gray-200);position:relative">
+              <label style="display:block;margin-bottom:8px;font-size:12px;color:#666">Add student without phone</label>
+              <div style="display:flex;gap:8px">
+                <input type="text" id="student-search" placeholder="Search by name or matric no…"
+                       oninput="searchStudents(this.value)"
+                       style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:4px;font-size:14px" />
+                <button onclick="clearSearch()" style="background:none;border:none;cursor:pointer;color:#999;font-size:18px">✕</button>
+              </div>
+              <div id="student-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1px solid var(--gray-300);border-top:none;max-height:200px;overflow-y:auto;z-index:10;margin:0 12px"></div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="att-table">
+                <thead><tr><th>Name</th><th>Reg no.</th><th>Time</th><th style="width:50px"></th></tr></thead>
+                <tbody id="att-body"></tbody>
+              </table>
+              <p class="empty-hint" id="att-empty">No check-ins yet.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="../assets/auth.js"></script>
+  <script>
+    const user  = requireAuth("lecturer");
+    const token = getToken();
+    let courses = [], selectedCourseId = null, session = null, socket = null;
+    let rows = [], searchDebounce = null;
+
+    document.getElementById("app").insertAdjacentHTML("afterbegin", renderSidebar("scan"));
+
+    // ── Boot ──────────────────────────────────────────────────────────────────
+    async function boot() {
+      try {
+        courses = await apiRequest("/courses", { token });
+        courses.sort((a,b) => a.courseCode.localeCompare(b.courseCode));
+        const sel = document.getElementById("course-select");
+        courses.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c._id; opt.textContent = `${c.courseCode} — ${c.courseTitle}`;
+          sel.appendChild(opt);
+        });
+        if (courses.length) { sel.value = courses[0]._id; selectedCourseId = courses[0]._id; await loadSessions(); }
+      } catch (err) { showBanner(err.message); }
+    }
+
+    async function onCourseChange() {
+      selectedCourseId = document.getElementById("course-select").value || null;
+      session = null; rows = [];
+      disconnectSocket();
+      renderQR(); renderTable();
+      if (selectedCourseId) await loadSessions();
+    }
+
+    async function loadSessions() {
+      if (!selectedCourseId) return;
+      try {
+        const data = await apiRequest(`/session?courseId=${selectedCourseId}`, { token });
+        const active = data.find(s => s.isActive) || null;
+        if (active) {
+          const detail = await apiRequest(`/session/${active.id}/rotate`, { method:"POST", token });
+          session = { ...detail, id: active.id, isActive: true };
+          const att = await apiRequest(`/attendance/session/${active.id}`, { token });
+          rows = att.rows;
+          connectSocket();
+        } else {
+          session = null; rows = [];
+        }
+        renderQR(); renderTable();
+        document.getElementById("session-btn").textContent = session ? "Stop session" : "Start session";
+        document.getElementById("session-btn").className   = session ? "btn btn-danger" : "btn btn-primary";
+      } catch (err) { showBanner(err.message); }
+    }
+
+    // ── Session control ───────────────────────────────────────────────────────
+    async function toggleSession() {
+      if (session) { await stopSession(); } else { await startSession(); }
+    }
+
+    async function startSession() {
+      if (!selectedCourseId) { showBanner("Select a course first."); return; }
+      try {
+        session = await apiRequest("/session/start", { method:"POST", token, body:{ courseId: selectedCourseId } });
+        rows = [];
+        renderQR(); renderTable();
+        connectSocket();
+        document.getElementById("session-btn").textContent = "Stop session";
+        document.getElementById("session-btn").className   = "btn btn-danger";
+        document.getElementById("manual-add-area").style.display = "block";
+        showBanner("");
+      } catch (err) { showBanner(err.message); }
+    }
+
+    async function stopSession() {
+      if (!session?.id) return;
+      try {
+        await apiRequest(`/session/${session.id}/stop`, { method:"POST", token });
+        session = null; rows = [];
+        disconnectSocket();
+        renderQR(); renderTable();
+        document.getElementById("session-btn").textContent = "Start session";
+        document.getElementById("session-btn").className   = "btn btn-primary";
+        document.getElementById("manual-add-area").style.display = "none";
+        showBanner("");
+      } catch (err) { showBanner(err.message); }
+    }
+
+    // ── QR render ─────────────────────────────────────────────────────────────
+    function renderQR() {
+      const body  = document.getElementById("qr-body");
+      const badge = document.getElementById("live-badge");
+      if (!session?.token) {
+        badge.style.display = "none";
+        body.innerHTML = `<div class="qr-empty"><div class="qr-empty__icon">📡</div><p>Start a session to generate a QR code</p></div>`;
+        return;
+      }
+      badge.style.display = "inline-flex";
+      const url = `${window.location.origin}/pages/student-scan.html?token=${session.token}`;
+      body.innerHTML = `<div class="qr-frame" id="qr-canvas"></div><div class="qr-meta" style="text-align:center"><div style="font-size:0.875rem;color:var(--gray-500)">Scan to mark attendance</div></div>`;
+      new QRCode(document.getElementById("qr-canvas"), { text: url, width:220, height:220, colorDark:"#ffffff", colorLight:"#111827" });
+    }
+
+    // ── Table render ──────────────────────────────────────────────────────────
+    function renderTable() {
+      const tbody = document.getElementById("att-body");
+      const empty = document.getElementById("att-empty");
+      document.getElementById("checkin-count").textContent = rows.length;
+      document.getElementById("manual-add-area").style.display = session?.isActive ? "block" : "none";
+      if (!rows.length) { tbody.innerHTML = ""; empty.style.display = "block"; return; }
+      empty.style.display = "none";
+      tbody.innerHTML = rows.map(r => `
+        <tr id="row-${r.id}">
+          <td>${r.student.name}</td>
+          <td class="mono">${r.student.matricNo}</td>
+          <td class="mono">${new Date(r.timestamp).toLocaleTimeString()}</td>
+          <td style="text-align:center">
+            <button onclick="deleteRow('${r.id}')" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:18px">✕</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function deleteRow(id) {
+      try {
+        await apiRequest(`/attendance/${id}`, { method:"DELETE", token });
+        rows = rows.filter(r => r.id !== id);
+        renderTable();
+      } catch (err) { showBanner(err.message); }
+    }
+
+    // ── Manual add ────────────────────────────────────────────────────────────
+    function searchStudents(query) {
+      clearTimeout(searchDebounce);
+      if (!query.trim() || !session?.id) { document.getElementById("student-dropdown").style.display = "none"; return; }
+      searchDebounce = setTimeout(async () => {
+        try {
+          const data = await apiRequest(`/attendance/available/students?sessionId=${session.id}&searchQuery=${encodeURIComponent(query)}`, { token });
+          const dd = document.getElementById("student-dropdown");
+          if (!data.length) { dd.style.display = "none"; return; }
+          dd.innerHTML = data.map(s => `
+            <div style="padding:10px 12px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center">
+              <div><div style="font-weight:500;font-size:14px">${s.name}</div><div style="font-size:12px;color:#666">${s.matricNo}</div></div>
+              <button onclick="addManually('${s._id}')" style="padding:4px 8px;background:#2563eb;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px">Add</button>
+            </div>
+          `).join("");
+          dd.style.display = "block";
+        } catch {}
+      }, 300);
+    }
+
+    async function addManually(studentId) {
+      try {
+        await apiRequest("/attendance/manual", { method:"POST", token, body:{ sessionId: session.id, studentId } });
+        clearSearch();
+        showBanner("");
+      } catch (err) { showBanner(err.message); }
+    }
+
+    function clearSearch() {
+      document.getElementById("student-search").value = "";
+      document.getElementById("student-dropdown").style.display = "none";
+    }
+
+    // ── Socket.IO ─────────────────────────────────────────────────────────────
+    function connectSocket() {
+      if (!session?.id) return;
+      disconnectSocket();
+      socket = io(API_URL, { auth:{ token }, query:{ sessionId: session.id } });
+      socket.on("attendance:created", payload => {
+        if (rows.some(r => r.id === payload.id)) return;
+        rows.unshift({ id: payload.id, student: payload.student, timestamp: payload.timestamp });
+        renderTable();
+      });
+      socket.on("attendance:deleted", payload => {
+        rows = rows.filter(r => r.id !== payload.id);
+        renderTable();
+      });
+      socket.on("session:rotated", ({ expiresAt }) => {
+        if (session) { session.expiresAt = expiresAt; }
+      });
+      socket.on("session:stopped", () => {
+        session = null; rows = [];
+        disconnectSocket(); renderQR(); renderTable();
+        document.getElementById("session-btn").textContent = "Start session";
+        document.getElementById("session-btn").className   = "btn btn-primary";
+      });
+    }
+
+    function disconnectSocket() {
+      if (socket) { socket.disconnect(); socket = null; }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

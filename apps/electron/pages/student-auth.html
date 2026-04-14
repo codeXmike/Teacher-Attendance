@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Login · AttendEase</title>
+  <link rel="stylesheet" href="../assets/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="shell__masthead">
+      <a href="../index.html" class="shell__brand">AttendEase</a>
+      <div class="shell__switch">
+        <span>Lecturer?</span>
+        <a href="lecturer-auth.html">Open lecturer access</a>
+      </div>
+    </header>
+
+    <div class="auth-panel">
+      <div class="section-head"><h1>Student Access</h1></div>
+
+      <div class="mode-toggle">
+        <button id="btn-login"    class="toggle-active" onclick="setMode('login')">Login</button>
+        <button id="btn-register"                       onclick="setMode('register')">Register</button>
+      </div>
+
+      <div id="error-msg" class="error-text" style="display:none"></div>
+
+      <form class="auth-form" onsubmit="submit(event)">
+        <div id="name-field" style="display:none">
+          <label><span>Name</span><input id="input-name" type="text" autocomplete="name" /></label>
+        </div>
+        <div id="matric-field" style="display:none">
+          <label><span>Matric Number</span><input id="input-matric" type="text" /></label>
+        </div>
+        <div id="level-field" style="display:none">
+          <label><span>Level</span>
+            <select id="input-level">
+              <option value="">Select level…</option>
+              <option>100</option><option>200</option><option>300</option>
+              <option>400</option><option>500</option>
+            </select>
+          </label>
+        </div>
+        <div id="dept-field" style="display:none">
+          <label><span>Department</span><input id="input-dept" type="text" placeholder="Computer Science" /></label>
+        </div>
+        <label><span>Email</span><input id="input-email" type="email" autocomplete="email" required /></label>
+        <label><span>Password</span>
+          <div class="password-field">
+            <input id="input-password" type="password" autocomplete="current-password" required />
+            <button type="button" class="password-toggle" onclick="togglePw()">Show</button>
+          </div>
+        </label>
+        <button type="submit" id="submit-btn" class="btn btn-primary" style="width:100%;justify-content:center">Login</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="../assets/auth.js"></script>
+  <script>
+    let mode = "login";
+
+    function setMode(m) {
+      mode = m;
+      ["name-field","matric-field","level-field","dept-field"].forEach(id =>
+        document.getElementById(id).style.display = m==="register" ? "block" : "none"
+      );
+      document.getElementById("btn-login").classList.toggle("toggle-active",    m==="login");
+      document.getElementById("btn-register").classList.toggle("toggle-active", m==="register");
+      document.getElementById("submit-btn").textContent = m==="login" ? "Login" : "Create Student Account";
+    }
+
+    function togglePw() {
+      const input = document.getElementById("input-password");
+      const btn   = document.querySelector(".password-toggle");
+      const show  = input.type==="password";
+      input.type  = show ? "text" : "password";
+      btn.textContent = show ? "Hide" : "Show";
+    }
+
+    async function submit(e) {
+      e.preventDefault();
+      const errEl = document.getElementById("error-msg");
+      const btn   = document.getElementById("submit-btn");
+      errEl.style.display="none"; btn.disabled=true; btn.textContent="Processing…";
+      try {
+        const body = {
+          email:    document.getElementById("input-email").value,
+          password: document.getElementById("input-password").value,
+          role:     "student",
+        };
+        if (mode==="register") {
+          body.name     = document.getElementById("input-name").value;
+          body.matricNo = document.getElementById("input-matric").value;
+          body.level    = document.getElementById("input-level").value;
+          body.department = document.getElementById("input-dept").value;
+        }
+        const payload = await apiRequest(`/auth/${mode}`, { method:"POST", body });
+        saveAuth(payload);
+        // Redirect to scan page (or back to QR if token in URL)
+        const params = new URLSearchParams(window.location.search);
+        window.location.href = params.get("token")
+          ? `student-scan.html?token=${params.get("token")}`
+          : "student-scan.html";
+      } catch (err) {
+        errEl.textContent=err.message; errEl.style.display="block";
+        btn.disabled=false; btn.textContent=mode==="login"?"Login":"Create Student Account";
+      }
+    }
+  </script>
+</body>
+</html>
