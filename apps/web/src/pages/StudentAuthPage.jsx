@@ -53,14 +53,7 @@ export const StudentAuthPage = () => {
             <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
           </label>
         ) : null}
-        <label>
-          <span>Lecturer Email</span>
-          <input
-            type="email"
-            value={form.lecturerEmail}
-            onChange={(event) => setForm({ ...form, lecturerEmail: event.target.value })}
-          />
-        </label>
+        
         <label>
           <span>Matric Number</span>
           <input
