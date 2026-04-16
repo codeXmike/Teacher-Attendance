@@ -43,8 +43,7 @@ export const StudentScanPage = () => {
           <span>Attendance Check-in</span>
         </div>
         <p className="muted">
-          This page acts as the iPhone and mobile web fallback. The QR code opens this link directly with a
-          short-lived token.
+          
         </p>
         <div className="scan-meta">
           <span>Token present: {tokenFromUrl ? "Yes" : "No"}</span>
@@ -63,8 +62,9 @@ export const StudentScanPage = () => {
           </div>
         ) : null}
         {!tokenFromUrl ? (
-          <p className="muted">
-            Open this page from a scanned QR link. <Link to="/">Return home</Link>
+          <p className="muted" style={{color:'orange'}}>
+            Open a QR code scanner in your device and scan the code displayed by the lecturer.
+            This page is accessed from the scanned QR link.
           </p>
         ) : null}
       </div>
