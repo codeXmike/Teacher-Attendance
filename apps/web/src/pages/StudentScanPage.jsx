@@ -64,7 +64,7 @@ export const StudentScanPage = () => {
         {!tokenFromUrl ? (
           <p className="muted" style={{color:'orange'}}>
             Open a QR code scanner in your device and scan the code displayed by the lecturer.
-            This page is accessed from the scanned QR link.
+            This page will be accessed from the scanned QR link.
           </p>
         ) : null}
       </div>
