@@ -68,7 +68,10 @@ button, .btn {
   background: transparent;
   font-family: inherit;
 }
-
+.authBtn{
+  background-color: #111827;
+  color: white;
+}
 button:disabled, .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;

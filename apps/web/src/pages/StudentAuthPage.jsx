@@ -80,7 +80,7 @@ export const StudentAuthPage = () => {
           </div>
         </label>
         {error ? <p className="error-text">{error}</p> : null}
-        <button type="submit" disabled={loading}>
+        <button type="submit" disabled={loading} className="authBtn">
           {loading ? "Processing..." : mode === "login" ? "Login" : "Create Student Access"}
         </button>
       </form>
