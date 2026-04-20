@@ -15,8 +15,13 @@ export const StudentScanPage = () => {
         "qr-reader",
         {
           fps: 10,
-          qrbox: { width: 250, height: 250 },
+          qrbox: { width: 300, height: 300 },
           aspectRatio: 1.0,
+          videoConstraints: {
+            facingMode: { ideal: "environment" } // Prefer back camera
+          },
+          showTorchButtonIfSupported: false,
+          showZoomSliderIfSupported: false,
         },
         false
       );
@@ -71,8 +76,13 @@ export const StudentScanPage = () => {
           "qr-reader",
           {
             fps: 10,
-            qrbox: { width: 250, height: 250 },
+            qrbox: { width: 300, height: 300 },
             aspectRatio: 1.0,
+            videoConstraints: {
+              facingMode: { ideal: "environment" } // Prefer back camera
+            },
+            showTorchButtonIfSupported: false,
+            showZoomSliderIfSupported: false,
           },
           false
         );
@@ -132,8 +142,13 @@ export const StudentScanPage = () => {
                     "qr-reader",
                     {
                       fps: 10,
-                      qrbox: { width: 250, height: 250 },
+                      qrbox: { width: 300, height: 300 },
                       aspectRatio: 1.0,
+                      videoConstraints: {
+                        facingMode: { ideal: "environment" } // Prefer back camera
+                      },
+                      showTorchButtonIfSupported: false,
+                      showZoomSliderIfSupported: false,
                     },
                     false
                   );
