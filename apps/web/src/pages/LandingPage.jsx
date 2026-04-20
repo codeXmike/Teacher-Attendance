@@ -12,7 +12,7 @@ export const LandingPage = () => {
           <p className="eyebrow">Welcome, {user.name}</p>
           <h1>Ready to check in?</h1>
           <p className="muted">
-            Scan a QR code to record your attendance.
+            Use your camera to scan QR codes and record attendance directly in your browser.
           </p>
           <div className="inline-actions">
             <Link to="/scan" className="button-link">
