@@ -29,17 +29,14 @@ const isIosDevice = () => {
   return /iPad|iPhone|iPod/i.test(userAgent) || (userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
 };
 
-const SCANNER_ELEMENT_ID = "student-scan-reader";
-
 export const StudentScanPage = () => {
   const { token, user } = useAuth();
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const scannerRef = useRef(null);
   const readerRef = useRef(null);
   const detectorRef = useRef(null);
-  const html5QrcodeRef = useRef(null);
   const animationFrameRef = useRef(null);
+  const manualScanTimeoutRef = useRef(null);
   const mountedRef = useRef(false);
   const scanLockRef = useRef(false);
   const [state, setState] = useState({
@@ -51,7 +48,7 @@ export const StudentScanPage = () => {
   });
   const useIosScanner = isIosDevice();
 
-  const stopScanner = async ({ resetLock = true } = {}) => {
+  const stopScanner = ({ resetLock = true } = {}) => {
     if (resetLock) {
       scanLockRef.current = false;
     }
@@ -61,28 +58,17 @@ export const StudentScanPage = () => {
       animationFrameRef.current = null;
     }
 
+    if (manualScanTimeoutRef.current) {
+      clearTimeout(manualScanTimeoutRef.current);
+      manualScanTimeoutRef.current = null;
+    }
+
     if (readerRef.current) {
       readerRef.current.reset();
       readerRef.current = null;
     }
 
     detectorRef.current = null;
-
-    if (html5QrcodeRef.current) {
-      try {
-        await html5QrcodeRef.current.stop();
-      } catch {
-        // Ignore stop errors when the scanner is already idle or still starting.
-      }
-
-      try {
-        html5QrcodeRef.current.clear();
-      } catch {
-        // Ignore cleanup errors from partially initialized scanner instances.
-      }
-
-      html5QrcodeRef.current = null;
-    }
 
     const video = videoRef.current;
     if (video?.srcObject) {
@@ -94,7 +80,7 @@ export const StudentScanPage = () => {
 
   const recordAttendance = async (decodedText) => {
     scanLockRef.current = true;
-    void stopScanner({ resetLock: false });
+    stopScanner({ resetLock: false });
 
     const scannedSessionToken = parseSessionTokenFromQr(decodedText);
     if (!scannedSessionToken) {
@@ -205,88 +191,59 @@ export const StudentScanPage = () => {
     animationFrameRef.current = requestAnimationFrame(loop);
   };
 
-  const startScanner = async () => {
-    if (!mountedRef.current) {
+  const startManualIosScanLoop = () => {
+    if (!readerRef.current || !videoRef.current || !canvasRef.current) {
       return;
     }
 
-    if (useIosScanner) {
-      if (!scannerRef.current) {
-        setState((current) => ({
-          ...current,
-          cameraReady: false,
-          status: "Scanner is not ready yet.",
-          error: "Scanner container is unavailable."
-        }));
+    const loop = () => {
+      if (!mountedRef.current || scanLockRef.current) {
         return;
       }
 
-      await stopScanner();
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
 
-      setState((current) => ({
-        ...current,
-        loading: false,
-        cameraReady: false,
-        status: "Opening the back camera...",
-        error: ""
-      }));
+      if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        manualScanTimeoutRef.current = window.setTimeout(loop, 120);
+        return;
+      }
+
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        manualScanTimeoutRef.current = window.setTimeout(loop, 120);
+        return;
+      }
+
+      const sourceSize = Math.min(video.videoWidth, video.videoHeight);
+      const cropSize = Math.floor(sourceSize * 0.92);
+      const sx = Math.floor((video.videoWidth - cropSize) / 2);
+      const sy = Math.floor((video.videoHeight - cropSize) / 2);
+
+      canvas.width = 1280;
+      canvas.height = 1280;
+      context.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
 
       try {
-        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
-        const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, {
-          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-          useBarCodeDetectorIfSupported: false
-        });
-
-        html5QrcodeRef.current = scanner;
-
-        await scanner.start(
-          {
-            facingMode: "environment",
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          },
-          {
-            fps: 10,
-            disableFlip: true
-          },
-          (decodedText) => {
-            if (!mountedRef.current || scanLockRef.current) {
-              return;
-            }
-
-            void recordAttendance(decodedText);
-          }
-        );
-
-        if (!mountedRef.current) {
-          await stopScanner({ resetLock: false });
+        const result = readerRef.current.decode(canvas);
+        const qrText = result?.getText?.() || "";
+        if (qrText) {
+          void recordAttendance(qrText);
           return;
         }
-
-        setState((current) => ({
-          ...current,
-          cameraReady: true,
-          status: "Camera live. Hold the QR inside the box."
-        }));
-        return;
-      } catch (error) {
-        await stopScanner({ resetLock: false });
-
-        const message =
-          typeof error === "string"
-            ? error
-            : error?.message || "Unable to start the camera. Try again.";
-
-        setState((current) => ({
-          ...current,
-          loading: false,
-          cameraReady: false,
-          status: "Camera could not be started.",
-          error: message
-        }));
-        return;
+      } catch {
+        // Keep scanning; iPhone WebKit can be noisy while the QR is moving.
       }
+
+      manualScanTimeoutRef.current = window.setTimeout(loop, 120);
+    };
+
+    manualScanTimeoutRef.current = window.setTimeout(loop, 120);
+  };
+
+  const startScanner = async () => {
+    if (!mountedRef.current) {
+      return;
     }
 
     if (!videoRef.current || !navigator.mediaDevices?.getUserMedia) {
@@ -299,7 +256,7 @@ export const StudentScanPage = () => {
       return;
     }
 
-    await stopScanner();
+    stopScanner();
 
     setState((current) => ({
       ...current,
@@ -308,8 +265,69 @@ export const StudentScanPage = () => {
       status: "Opening the back camera...",
       error: ""
     }));
-    
+
     try {
+      if (useIosScanner) {
+        let stream = null;
+
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              facingMode: { exact: "environment" },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            }
+          });
+        } catch {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: {
+                facingMode: { ideal: "environment" },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+              }
+            });
+          } catch {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: true
+            });
+          }
+        }
+
+        if (!mountedRef.current || !videoRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        const video = videoRef.current;
+        video.srcObject = stream;
+        video.muted = true;
+        video.playsInline = true;
+        video.setAttribute("playsinline", "true");
+        video.setAttribute("webkit-playsinline", "true");
+        await video.play();
+
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+        readerRef.current = new BrowserMultiFormatReader(hints, 100);
+
+        if (!mountedRef.current) {
+          stopScanner({ resetLock: false });
+          return;
+        }
+
+        setState((current) => ({
+          ...current,
+          cameraReady: true,
+          status: "Camera live. Hold the QR inside the box."
+        }));
+        startManualIosScanLoop();
+        return;
+      }
+
       let stream = null;
 
       try {
@@ -393,7 +411,7 @@ export const StudentScanPage = () => {
 
     return () => {
       mountedRef.current = false;
-      void stopScanner();
+      stopScanner();
     };
   }, []);
 
@@ -415,13 +433,9 @@ export const StudentScanPage = () => {
           <>
             <div className="scan-container">
               <div className="scan-frame">
-                {useIosScanner ? (
-                  <div ref={scannerRef} id={SCANNER_ELEMENT_ID} className="scan-surface" />
-                ) : (
-                  <video ref={videoRef} className="scan-video" autoPlay muted playsInline webkit-playsinline="true" />
-                )}
+                <video ref={videoRef} className="scan-video" autoPlay muted playsInline webkit-playsinline="true" />
                 <div className="scan-frame__guide" />
-                {!useIosScanner ? <canvas ref={canvasRef} className="scan-canvas" aria-hidden="true" /> : null}
+                <canvas ref={canvasRef} className="scan-canvas" aria-hidden="true" />
               </div>
               {state.loading ? (
                 <div className="scan-overlay">
