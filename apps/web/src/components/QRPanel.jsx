@@ -16,7 +16,9 @@ const MinimizeIcon = () => (
 
 export const QRPanel = ({ session, selectedCourse }) => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const sessionUrl = session?.token ? `${window.location.origin}/scan?token=${session.token}` : "";
+  const qrPayload = session?.token
+    ? JSON.stringify({ type: "attendance-session-token", token: session.token })
+    : "";
 
   return (
     <>
@@ -40,7 +42,7 @@ export const QRPanel = ({ session, selectedCourse }) => {
           {session?.token ? (
             <>
               <div className="qr-frame">
-                <QRCodeSVG value={sessionUrl} size={180} bgColor="#111827" fgColor="#f9fafb" level="H" />
+                <QRCodeSVG value={qrPayload} size={180} bgColor="#111827" fgColor="#f9fafb" level="H" />
               </div>
               <div className="qr-meta">
                 <span className="qr-meta__code">{selectedCourse?.courseCode}</span>
@@ -68,7 +70,7 @@ export const QRPanel = ({ session, selectedCourse }) => {
             </div>
             <div className="qr-modal__body">
               <div className="qr-modal__frame">
-                <QRCodeSVG value={sessionUrl} size={300} bgColor="#111827" fgColor="#f9fafb" level="H" />
+                <QRCodeSVG value={qrPayload} size={300} bgColor="#111827" fgColor="#f9fafb" level="H" />
               </div>
               <div className="qr-modal__info">
                 <div className="qr-modal__code">{selectedCourse?.courseCode}</div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { apiRequest } from "../api/client";
 import { AuthShell } from "../components/AuthShell";
 import { ModeToggle } from "../components/ModeToggle";
@@ -16,7 +16,6 @@ export const StudentAuthPage = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const location = useLocation();
   const navigate = useNavigate();
   const { login } = useAuth();
 
@@ -30,7 +29,7 @@ export const StudentAuthPage = () => {
         body: { ...form, role: "student" }
       });
       login(payload);
-      navigate(`/scan${location.search || ""}`);
+      navigate("/scan");
     } catch (nextError) {
       setError(nextError.message);
     } finally {

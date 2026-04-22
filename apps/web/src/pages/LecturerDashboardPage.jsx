@@ -139,8 +139,6 @@ export const LecturerDashboardPage = () => {
     }
   };
 
-  const sessionUrl = session?.token ? `${window.location.origin}/scan?token=${session.token}` : "";
-
   return (
     <LecturerShell user={user} onLogout={logout} title="Live session">
       {error && <div className="shell-banner shell-banner--error">{error}</div>}

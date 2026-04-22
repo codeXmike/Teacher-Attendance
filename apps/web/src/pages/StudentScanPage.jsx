@@ -3,57 +3,75 @@ import { Html5QrcodeScanner } from "html5-qrcode";
 import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
+const SCAN_CONFIG = {
+  fps: 10,
+  qrbox: { width: 300, height: 300 },
+  aspectRatio: 1,
+  videoConstraints: {
+    facingMode: { ideal: "environment" }
+  },
+  showTorchButtonIfSupported: false,
+  showZoomSliderIfSupported: false
+};
+
+const parseSessionTokenFromQr = (decodedText) => {
+  try {
+    const payload = JSON.parse(decodedText);
+    if (payload?.type !== "attendance-session-token") {
+      return null;
+    }
+
+    const sessionToken = typeof payload.token === "string" ? payload.token.trim() : "";
+    return sessionToken || null;
+  } catch {
+    return null;
+  }
+};
+
 export const StudentScanPage = () => {
   const { token, user } = useAuth();
   const [state, setState] = useState({ loading: false, error: "", result: null });
   const scannerRef = useRef(null);
   const scannerInstanceRef = useRef(null);
 
-  useEffect(() => {
+  const clearScanner = async () => {
     if (!scannerInstanceRef.current) {
-      scannerInstanceRef.current = new Html5QrcodeScanner(
-        "qr-reader",
-        {
-          fps: 10,
-          qrbox: { width: 300, height: 300 },
-          aspectRatio: 1.0,
-          videoConstraints: {
-            facingMode: { ideal: "environment" } // Prefer back camera
-          },
-          showTorchButtonIfSupported: false,
-          showZoomSliderIfSupported: false,
-        },
-        false
-      );
-
-      scannerInstanceRef.current.render(onScanSuccess, onScanError);
+      return;
     }
 
-    return () => {
-      if (scannerInstanceRef.current) {
-        scannerInstanceRef.current.clear();
-        scannerInstanceRef.current = null;
-      }
-    };
-  }, []);
+    try {
+      await scannerInstanceRef.current.clear();
+    } catch {
+      // Ignore scanner clear errors during restart/teardown.
+    } finally {
+      scannerInstanceRef.current = null;
+    }
+  };
+
+  const onScanError = () => {
+    // Keep scanning and ignore frame-level decode errors.
+  };
+
+  const renderScanner = () => {
+    if (scannerInstanceRef.current) {
+      return;
+    }
+
+    scannerInstanceRef.current = new Html5QrcodeScanner("qr-reader", SCAN_CONFIG, false);
+    scannerInstanceRef.current.render(onScanSuccess, onScanError);
+  };
 
   const onScanSuccess = async (decodedText) => {
-    // Stop scanning after successful scan
-    if (scannerInstanceRef.current) {
-      scannerInstanceRef.current.clear();
-    }
+    await clearScanner();
 
-    // Extract token from scanned content
-    let tokenToUse = decodedText;
-    
-    // If it's a URL with token parameter, extract the token
-    if (decodedText.includes('/scan?token=')) {
-      const url = new URL(decodedText);
-      tokenToUse = url.searchParams.get('token');
-    }
-
-    if (!tokenToUse) {
-      setState((current) => ({ ...current, loading: false, error: "Invalid QR code. No session token found." }));
+    const scannedSessionToken = parseSessionTokenFromQr(decodedText);
+    if (!scannedSessionToken) {
+      setState((current) => ({
+        ...current,
+        loading: false,
+        error: "Invalid QR code. Please scan the live attendance QR from your lecturer."
+      }));
+      renderScanner();
       return;
     }
 
@@ -64,37 +82,23 @@ export const StudentScanPage = () => {
         method: "POST",
         token,
         body: {
-          token: tokenToUse
+          token: scannedSessionToken
         }
       });
       setState((current) => ({ ...current, loading: false, result }));
     } catch (error) {
       setState((current) => ({ ...current, loading: false, error: error.message }));
-      // Restart scanning on error
-      if (!scannerInstanceRef.current) {
-        scannerInstanceRef.current = new Html5QrcodeScanner(
-          "qr-reader",
-          {
-            fps: 10,
-            qrbox: { width: 300, height: 300 },
-            aspectRatio: 1.0,
-            videoConstraints: {
-              facingMode: { ideal: "environment" } // Prefer back camera
-            },
-            showTorchButtonIfSupported: false,
-            showZoomSliderIfSupported: false,
-          },
-          false
-        );
-        scannerInstanceRef.current.render(onScanSuccess, onScanError);
-      }
+      renderScanner();
     }
   };
 
-  const onScanError = (error) => {
-    // Ignore scan errors, just keep scanning
-    console.log("QR scan error:", error);
-  };
+  useEffect(() => {
+    renderScanner();
+
+    return () => {
+      clearScanner();
+    };
+  }, []);
 
   return (
     <div className="student-scan">
@@ -108,9 +112,7 @@ export const StudentScanPage = () => {
         <div className="section-head">
           <span>Scan QR Code</span>
         </div>
-        <p className="muted">
-          Point your camera at the QR code displayed by the lecturer to record your attendance.
-        </p>
+        <p className="muted">Use your back camera to scan the live QR code displayed by your lecturer.</p>
 
         {!state.result ? (
           <div className="scan-container">
@@ -127,7 +129,7 @@ export const StudentScanPage = () => {
 
         {state.result ? (
           <div className="success-block">
-            <h1>✓ Attendance Recorded</h1>
+            <h1>Attendance Recorded</h1>
             <p>
               {state.result.course.courseCode} - {state.result.course.courseTitle}
             </p>
@@ -136,24 +138,7 @@ export const StudentScanPage = () => {
               className="btn btn-secondary"
               onClick={() => {
                 setState({ loading: false, error: "", result: null });
-                // Restart scanner
-                if (!scannerInstanceRef.current) {
-                  scannerInstanceRef.current = new Html5QrcodeScanner(
-                    "qr-reader",
-                    {
-                      fps: 10,
-                      qrbox: { width: 300, height: 300 },
-                      aspectRatio: 1.0,
-                      videoConstraints: {
-                        facingMode: { ideal: "environment" } // Prefer back camera
-                      },
-                      showTorchButtonIfSupported: false,
-                      showZoomSliderIfSupported: false,
-                    },
-                    false
-                  );
-                  scannerInstanceRef.current.render(onScanSuccess, onScanError);
-                }
+                renderScanner();
               }}
             >
               Scan Another Code
