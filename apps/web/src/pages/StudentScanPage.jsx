@@ -241,15 +241,14 @@ export const StudentScanPage = () => {
         html5QrcodeRef.current = scanner;
 
         await scanner.start(
-          { facingMode: { exact: "environment" } },
           {
-            fps: 12,
-            qrbox: (viewfinderWidth, viewfinderHeight) => {
-              const size = Math.max(220, Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.82));
-              return { width: size, height: size };
-            },
-            aspectRatio: 1,
-            disableFlip: false
+            facingMode: "environment",
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          },
+          {
+            fps: 10,
+            disableFlip: true
           },
           (decodedText) => {
             if (!mountedRef.current || scanLockRef.current) {
