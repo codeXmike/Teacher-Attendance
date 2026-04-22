@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { io } from "socket.io-client";
-import { QRCodeSVG } from "qrcode.react";
 import { apiRequest, getApiUrl } from "../api/client";
 import { LecturerShell } from "../components/LecturerShell";
 import { useAuth } from "../context/AuthContext";
@@ -15,6 +14,7 @@ export const LecturerDashboardPage = () => {
   const [availableStudents, setAvailableStudents] = useState([]);
   const [studentSearch, setStudentSearch] = useState("");
   const [addingStudent, setAddingStudent] = useState(false);
+  const [refreshingQr, setRefreshingQr] = useState(false);
 
   const selectedCourse = useMemo(
     () => courses.find((c) => c._id === selectedCourseId) || null,
@@ -33,7 +33,7 @@ export const LecturerDashboardPage = () => {
       const active = data.find((e) => e.isActive) || null;
       if (active) {
         const detail = await apiRequest(`/session/${active.id}/rotate`, { method: "POST", token });
-        setSession({ ...detail, id: active.id, isActive: true });
+        setSession({ ...detail, id: active.id, isActive: true, qrAttendanceCount: detail.qrAttendanceCount ?? 0 });
         await loadAttendance(active.id);
       } else {
         setSession(null);
@@ -56,12 +56,23 @@ export const LecturerDashboardPage = () => {
         if (curr.some((r) => r.id === payload.id)) return curr;
         return [{ id: payload.id, student: payload.student, timestamp: payload.timestamp }, ...curr];
       });
+      setSession((curr) => (curr ? { ...curr, qrAttendanceCount: payload.qrAttendanceCount ?? curr.qrAttendanceCount } : curr));
     });
     socket.on("attendance:deleted", (payload) => {
       setAttendanceRows((curr) => curr.filter((r) => r.id !== payload.id));
+      setSession((curr) => (curr ? { ...curr, qrAttendanceCount: payload.qrAttendanceCount ?? curr.qrAttendanceCount } : curr));
     });
-    socket.on("session:rotated", ({ expiresAt }) => {
-      setSession((curr) => curr ? { ...curr, expiresAt } : curr);
+    socket.on("session:rotated", ({ expiresAt, token: nextToken, qrAttendanceCount }) => {
+      setSession((curr) => (
+        curr
+          ? {
+              ...curr,
+              expiresAt,
+              token: nextToken || curr.token,
+              qrAttendanceCount: qrAttendanceCount ?? 0
+            }
+          : curr
+      ));
     });
     socket.on("session:stopped", () => { setSession(null); setAttendanceRows([]); });
 
@@ -75,7 +86,7 @@ export const LecturerDashboardPage = () => {
         method: "POST", token,
         body: { courseId: selectedCourseId }
       });
-      setSession(created);
+      setSession({ ...created, qrAttendanceCount: created.qrAttendanceCount ?? 0 });
       setAttendanceRows([]);
       await loadAttendance(created.id);
       setError("");
@@ -93,6 +104,20 @@ export const LecturerDashboardPage = () => {
       setError("");
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  const refreshQr = async () => {
+    if (!session?.id) return;
+    try {
+      setRefreshingQr(true);
+      const refreshed = await apiRequest(`/session/${session.id}/rotate`, { method: "POST", token });
+      setSession((curr) => (curr ? { ...curr, ...refreshed, qrAttendanceCount: refreshed.qrAttendanceCount ?? 0 } : curr));
+      setError("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRefreshingQr(false);
     }
   };
 
@@ -172,8 +197,10 @@ export const LecturerDashboardPage = () => {
         <div className="dash-grid">
           {/* QR panel */}
           <QRPanel
-            session={session} 
+            session={session}
             selectedCourse={selectedCourse}
+            onRefresh={refreshQr}
+            isRefreshing={refreshingQr}
           />
 
           {/* Attendance list */}

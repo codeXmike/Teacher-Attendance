@@ -576,7 +576,13 @@ label {
   margin: 0;
 }
 
-.qr-maximize-btn {
+.qr-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qr-action-btn {
   background: transparent;
   border: none;
   cursor: pointer;
@@ -589,10 +595,15 @@ label {
   color: var(--gray-500);
 }
 
-.qr-maximize-btn:hover {
+.qr-action-btn:hover:not(:disabled) {
   background: var(--gray-100);
   color: var(--gray-900);
   transform: scale(1.1);
+}
+
+.qr-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* QR Maximized Modal */
@@ -773,6 +784,14 @@ label {
 .qr-meta__title {
   font-size: 0.875rem;
   color: var(--gray-500);
+}
+
+.qr-meta__limit {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.813rem;
+  color: var(--gray-600);
+  font-weight: 600;
 }
 
 .qr-meta__timer {

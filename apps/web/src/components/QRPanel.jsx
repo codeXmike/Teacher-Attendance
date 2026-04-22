@@ -1,6 +1,12 @@
-// QRPanel.jsx - Add this component
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
+
+const RefreshIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+    <path d="M21 3v6h-6" />
+  </svg>
+);
 
 const MaximizeIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -14,11 +20,12 @@ const MinimizeIcon = () => (
   </svg>
 );
 
-export const QRPanel = ({ session, selectedCourse }) => {
+export const QRPanel = ({ session, selectedCourse, onRefresh, isRefreshing }) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const qrPayload = session?.token
     ? JSON.stringify({ type: "attendance-session-token", token: session.token })
     : "";
+  const qrAttendanceCount = session?.qrAttendanceCount ?? 0;
 
   return (
     <>
@@ -29,13 +36,19 @@ export const QRPanel = ({ session, selectedCourse }) => {
             {session && <span className="badge badge--live">LIVE</span>}
           </div>
           {session?.token && (
-            <button 
-              className="qr-maximize-btn" 
-              onClick={() => setIsMaximized(true)}
-              title="Maximize"
-            >
-              <MaximizeIcon />
-            </button>
+            <div className="qr-header-actions">
+              <button
+                className="qr-action-btn"
+                onClick={onRefresh}
+                title="Refresh QR"
+                disabled={isRefreshing}
+              >
+                <RefreshIcon />
+              </button>
+              <button className="qr-action-btn" onClick={() => setIsMaximized(true)} title="Maximize">
+                <MaximizeIcon />
+              </button>
+            </div>
           )}
         </div>
         <div className="qr-body">
@@ -47,21 +60,21 @@ export const QRPanel = ({ session, selectedCourse }) => {
               <div className="qr-meta">
                 <span className="qr-meta__code">{selectedCourse?.courseCode}</span>
                 <span className="qr-meta__title">{selectedCourse?.courseTitle}</span>
+                <span className="qr-meta__limit">{qrAttendanceCount}/10 students on this QR</span>
               </div>
             </>
           ) : (
             <div className="qr-empty">
-              <div className="qr-empty__icon">📱</div>
+              <div className="qr-empty__icon">QR</div>
               <p>Start a session to generate a QR code.</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Maximized Modal */}
       {isMaximized && session?.token && (
         <div className="qr-modal-overlay" onClick={() => setIsMaximized(false)}>
-          <div className="qr-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="qr-modal" onClick={(event) => event.stopPropagation()}>
             <div className="qr-modal__header">
               <h3>QR Code - {selectedCourse?.courseCode}</h3>
               <button className="qr-modal__close" onClick={() => setIsMaximized(false)}>
@@ -75,8 +88,9 @@ export const QRPanel = ({ session, selectedCourse }) => {
               <div className="qr-modal__info">
                 <div className="qr-modal__code">{selectedCourse?.courseCode}</div>
                 <div className="qr-modal__title">{selectedCourse?.courseTitle}</div>
+                <div className="qr-modal__title">{qrAttendanceCount}/10 students on this QR</div>
                 <div className="qr-modal__badge">
-                  <span>●</span> Live Session Active
+                  <span>Live</span> Session Active
                 </div>
               </div>
             </div>
