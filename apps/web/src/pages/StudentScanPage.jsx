@@ -20,25 +20,12 @@ const parseSessionTokenFromQr = (decodedText) => {
 const hasNativeQrDetector = () =>
   typeof window !== "undefined" && typeof window.BarcodeDetector !== "undefined";
 
-const isIosDevice = () => {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-
-  const userAgent = navigator.userAgent || "";
-  return /iPad|iPhone|iPod/i.test(userAgent) || (userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
-};
-
-const SCANNER_ELEMENT_ID = "student-scan-reader";
-
 export const StudentScanPage = () => {
   const { token, user } = useAuth();
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const scannerRef = useRef(null);
   const readerRef = useRef(null);
   const detectorRef = useRef(null);
-  const html5QrcodeRef = useRef(null);
   const animationFrameRef = useRef(null);
   const mountedRef = useRef(false);
   const scanLockRef = useRef(false);
@@ -49,9 +36,8 @@ export const StudentScanPage = () => {
     status: "Starting camera...",
     cameraReady: false
   });
-  const useHtml5Scanner = isIosDevice();
 
-  const stopScanner = async ({ resetLock = true } = {}) => {
+  const stopScanner = ({ resetLock = true } = {}) => {
     if (resetLock) {
       scanLockRef.current = false;
     }
@@ -68,22 +54,6 @@ export const StudentScanPage = () => {
 
     detectorRef.current = null;
 
-    if (html5QrcodeRef.current) {
-      try {
-        await html5QrcodeRef.current.stop();
-      } catch {
-        // Ignore stop errors when the scanner is already idle or still starting.
-      }
-
-      try {
-        html5QrcodeRef.current.clear();
-      } catch {
-        // Ignore cleanup errors from partially initialized scanner instances.
-      }
-
-      html5QrcodeRef.current = null;
-    }
-
     const video = videoRef.current;
     if (video?.srcObject) {
       const tracks = video.srcObject.getTracks?.() || [];
@@ -94,7 +64,7 @@ export const StudentScanPage = () => {
 
   const recordAttendance = async (decodedText) => {
     scanLockRef.current = true;
-    void stopScanner({ resetLock: false });
+    stopScanner({ resetLock: false });
 
     const scannedSessionToken = parseSessionTokenFromQr(decodedText);
     if (!scannedSessionToken) {
@@ -210,82 +180,6 @@ export const StudentScanPage = () => {
       return;
     }
 
-    if (useHtml5Scanner) {
-      if (!scannerRef.current) {
-        setState((current) => ({
-          ...current,
-          cameraReady: false,
-          status: "Scanner is not ready yet.",
-          error: "Scanner container is unavailable."
-        }));
-        return;
-      }
-
-      await stopScanner();
-
-      setState((current) => ({
-        ...current,
-        loading: false,
-        cameraReady: false,
-        status: "Opening the back camera...",
-        error: ""
-      }));
-
-      try {
-        const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
-        const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, {
-          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-          useBarCodeDetectorIfSupported: true
-        });
-
-        html5QrcodeRef.current = scanner;
-
-        await scanner.start(
-          { facingMode: { ideal: "environment" } },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            disableFlip: false
-          },
-          (decodedText) => {
-            if (!mountedRef.current || scanLockRef.current) {
-              return;
-            }
-
-            void recordAttendance(decodedText);
-          }
-        );
-
-        if (!mountedRef.current) {
-          await stopScanner({ resetLock: false });
-          return;
-        }
-
-        setState((current) => ({
-          ...current,
-          cameraReady: true,
-          status: "Camera live. Hold the QR inside the box."
-        }));
-        return;
-      } catch (error) {
-        await stopScanner({ resetLock: false });
-
-        const message =
-          typeof error === "string"
-            ? error
-            : error?.message || "Unable to start the camera. Try again.";
-
-        setState((current) => ({
-          ...current,
-          loading: false,
-          cameraReady: false,
-          status: "Camera could not be started.",
-          error: message
-        }));
-        return;
-      }
-    }
-
     if (!videoRef.current || !navigator.mediaDevices?.getUserMedia) {
       setState((current) => ({
         ...current,
@@ -296,7 +190,7 @@ export const StudentScanPage = () => {
       return;
     }
 
-    await stopScanner();
+    stopScanner();
 
     setState((current) => ({
       ...current,
@@ -336,7 +230,9 @@ export const StudentScanPage = () => {
       const video = videoRef.current;
       video.srcObject = stream;
       video.muted = true;
+      video.playsInline = true;
       video.setAttribute("playsinline", "true");
+      video.setAttribute("webkit-playsinline", "true");
       await video.play();
 
       setState((current) => ({
@@ -385,7 +281,7 @@ export const StudentScanPage = () => {
 
     return () => {
       mountedRef.current = false;
-      void stopScanner();
+      stopScanner();
     };
   }, []);
 
@@ -407,13 +303,9 @@ export const StudentScanPage = () => {
           <>
             <div className="scan-container">
               <div className="scan-frame">
-                {useHtml5Scanner ? (
-                  <div ref={scannerRef} id={SCANNER_ELEMENT_ID} className="scan-surface" />
-                ) : (
-                  <video ref={videoRef} className="scan-video" autoPlay muted playsInline />
-                )}
+                <video ref={videoRef} className="scan-video" autoPlay muted playsInline webkit-playsinline="true" />
                 <div className="scan-frame__guide" />
-                {!useHtml5Scanner ? <canvas ref={canvasRef} className="scan-canvas" aria-hidden="true" /> : null}
+                <canvas ref={canvasRef} className="scan-canvas" aria-hidden="true" />
               </div>
               {state.loading ? (
                 <div className="scan-overlay">
