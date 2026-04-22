@@ -17,10 +17,16 @@ const parseSessionTokenFromQr = (decodedText) => {
   }
 };
 
+const hasNativeQrDetector = () =>
+  typeof window !== "undefined" && typeof window.BarcodeDetector !== "undefined";
+
 export const StudentScanPage = () => {
   const { token, user } = useAuth();
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const readerRef = useRef(null);
+  const detectorRef = useRef(null);
+  const animationFrameRef = useRef(null);
   const mountedRef = useRef(false);
   const scanLockRef = useRef(false);
   const [state, setState] = useState({
@@ -36,10 +42,17 @@ export const StudentScanPage = () => {
       scanLockRef.current = false;
     }
 
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
     if (readerRef.current) {
       readerRef.current.reset();
       readerRef.current = null;
     }
+
+    detectorRef.current = null;
 
     const video = videoRef.current;
     if (video?.srcObject) {
@@ -49,7 +62,7 @@ export const StudentScanPage = () => {
     }
   };
 
-  const handleDecodedText = async (decodedText) => {
+  const recordAttendance = async (decodedText) => {
     scanLockRef.current = true;
     stopScanner({ resetLock: false });
 
@@ -63,7 +76,6 @@ export const StudentScanPage = () => {
         error: "Invalid QR code. Please scan the lecturer's live QR."
       }));
       scanLockRef.current = false;
-      await startScanner();
       return;
     }
 
@@ -108,8 +120,59 @@ export const StudentScanPage = () => {
         status: "Scan failed. Restarting camera...",
         error: error.message
       }));
-      await startScanner();
+      scanLockRef.current = false;
+      void startScanner();
     }
+  };
+
+  const startNativeScanLoop = () => {
+    if (!detectorRef.current || !videoRef.current || !canvasRef.current) {
+      return;
+    }
+
+    const loop = async () => {
+      if (!mountedRef.current || scanLockRef.current) {
+        return;
+      }
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        animationFrameRef.current = requestAnimationFrame(loop);
+        return;
+      }
+
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        animationFrameRef.current = requestAnimationFrame(loop);
+        return;
+      }
+
+      const sourceSize = Math.min(video.videoWidth, video.videoHeight);
+      const cropSize = Math.floor(sourceSize * 0.82);
+      const sx = Math.floor((video.videoWidth - cropSize) / 2);
+      const sy = Math.floor((video.videoHeight - cropSize) / 2);
+
+      canvas.width = 640;
+      canvas.height = 640;
+      context.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
+
+      try {
+        const detections = await detectorRef.current.detect(canvas);
+        const qrText = detections?.[0]?.rawValue;
+        if (qrText) {
+          await recordAttendance(qrText);
+          return;
+        }
+      } catch {
+        // Keep scanning; a failed frame is normal while the QR is moving.
+      }
+
+      animationFrameRef.current = requestAnimationFrame(loop);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(loop);
   };
 
   const startScanner = async () => {
@@ -143,17 +206,20 @@ export const StudentScanPage = () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: {
-            facingMode: { exact: "environment" }
-          }
+          video: { facingMode: { exact: "environment" } }
         });
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: { ideal: "environment" }
-          }
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { ideal: "environment" } }
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true
+          });
+        }
       }
 
       if (!mountedRef.current || !videoRef.current) {
@@ -167,32 +233,27 @@ export const StudentScanPage = () => {
       video.setAttribute("playsinline", "true");
       await video.play();
 
-      const reader = new BrowserMultiFormatReader(150);
-      readerRef.current = reader;
-
       setState((current) => ({
         ...current,
         cameraReady: true,
         status: "Camera live. Hold the QR inside the box."
       }));
 
-      void reader.decodeFromVideoElementContinuously(video, (result, error) => {
-        if (!mountedRef.current || scanLockRef.current) {
+      if (hasNativeQrDetector()) {
+        detectorRef.current = new window.BarcodeDetector({ formats: ["qr_code"] });
+        startNativeScanLoop();
+        return;
+      }
+
+      const reader = new BrowserMultiFormatReader(100);
+      readerRef.current = reader;
+
+      void reader.decodeFromVideoElementContinuously(video, (result) => {
+        if (!mountedRef.current || scanLockRef.current || !result) {
           return;
         }
 
-        if (result) {
-          void handleDecodedText(result.getText());
-          return;
-        }
-
-        if (error && error.name && error.name !== "NotFoundException") {
-          setState((current) => ({
-            ...current,
-            cameraReady: true,
-            status: "Camera is live. Keep the QR steady inside the box."
-          }));
-        }
+        void recordAttendance(result.getText());
       });
     } catch (error) {
       const message =
@@ -242,6 +303,7 @@ export const StudentScanPage = () => {
               <div className="scan-frame">
                 <video ref={videoRef} className="scan-video" autoPlay muted playsInline />
                 <div className="scan-frame__guide" />
+                <canvas ref={canvasRef} className="scan-canvas" aria-hidden="true" />
               </div>
               {state.loading ? (
                 <div className="scan-overlay">

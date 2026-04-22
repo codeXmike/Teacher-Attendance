@@ -1434,6 +1434,14 @@ label {
   display: block;
 }
 
+.scan-canvas {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .scan-frame__guide {
   position: absolute;
   top: 0;
