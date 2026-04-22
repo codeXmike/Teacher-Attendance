@@ -1423,6 +1423,7 @@ label {
   width: 100%;
   min-height: 400px;
   position: relative;
+  background: #050505;
 }
 
 .qr-scanner video {
@@ -1430,6 +1431,13 @@ label {
   height: auto;
   display: block;
   border-radius: 0.5rem;
+}
+
+.scan-video {
+  width: 100%;
+  min-height: 400px;
+  object-fit: cover;
+  background: #050505;
 }
 
 .qr-scanner canvas {
@@ -1489,6 +1497,19 @@ label {
   color: #ffffff;
   font-size: 1.1rem;
   font-weight: 500;
+}
+
+.scan-status {
+  text-align: center;
+  color: #d4d4d4;
+  font-size: 0.95rem;
+  margin: -0.5rem auto 0;
+  max-width: 420px;
+}
+
+.scan-actions {
+  display: flex;
+  justify-content: center;
 }
 
 .success-block {
