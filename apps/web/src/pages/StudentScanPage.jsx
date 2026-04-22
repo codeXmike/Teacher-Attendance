@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/library";
+import { BarcodeFormat, BrowserMultiFormatReader, DecodeHintType } from "@zxing/library";
 import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
@@ -199,7 +199,7 @@ export const StudentScanPage = () => {
       status: "Opening the back camera...",
       error: ""
     }));
-
+    
     try {
       let stream = null;
 
@@ -247,7 +247,10 @@ export const StudentScanPage = () => {
         return;
       }
 
-      const reader = new BrowserMultiFormatReader(100);
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+
+      const reader = new BrowserMultiFormatReader(hints, 100);
       readerRef.current = reader;
 
       void reader.decodeFromVideoElementContinuously(video, (result) => {
