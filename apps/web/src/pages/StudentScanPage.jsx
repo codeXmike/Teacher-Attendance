@@ -241,7 +241,7 @@ export const StudentScanPage = () => {
         html5QrcodeRef.current = scanner;
 
         await scanner.start(
-          { facingMode: { ideal: "environment" } },
+          { facingMode: { exact: "environment" } },
           {
             fps: 12,
             qrbox: (viewfinderWidth, viewfinderHeight) => {
