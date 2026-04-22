@@ -17,21 +17,6 @@ const parseSessionTokenFromQr = (decodedText) => {
   }
 };
 
-const chooseBackCamera = async () => {
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const videoDevices = devices.filter((device) => device.kind === "videoinput");
-
-  if (videoDevices.length === 0) {
-    return null;
-  }
-
-  const preferred = videoDevices.find((device) =>
-    /back|rear|environment|main/i.test(`${device.label} ${device.deviceId}`)
-  );
-
-  return preferred?.deviceId || videoDevices[0].deviceId;
-};
-
 export const StudentScanPage = () => {
   const { token, user } = useAuth();
   const videoRef = useRef(null);
@@ -77,6 +62,8 @@ export const StudentScanPage = () => {
         status: "Only the live attendance QR works here.",
         error: "Invalid QR code. Please scan the lecturer's live QR."
       }));
+      scanLockRef.current = false;
+      await startScanner();
       return;
     }
 
@@ -151,17 +138,24 @@ export const StudentScanPage = () => {
     }));
 
     try {
-      const preferredDeviceId = await chooseBackCamera();
-      const constraints = preferredDeviceId
-        ? { audio: false, video: { deviceId: { exact: preferredDeviceId } } }
-        : {
-            audio: false,
-            video: {
-              facingMode: { ideal: "environment" }
-            }
-          };
+      let stream = null;
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { exact: "environment" }
+          }
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: "environment" }
+          }
+        });
+      }
+
       if (!mountedRef.current || !videoRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
