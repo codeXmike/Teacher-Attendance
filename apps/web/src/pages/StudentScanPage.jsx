@@ -3,282 +3,339 @@ import QrScanner from "qr-scanner";
 import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
-const parseSessionTokenFromQr = (decodedText) => {
-  try {
-    const payload = JSON.parse(decodedText);
-    if (payload?.type !== "attendance-session-token") {
-      return null;
-    }
+const SCAN_DELAY_MS = 180;
 
-    const sessionToken = typeof payload.token === "string" ? payload.token.trim() : "";
-    return sessionToken || null;
-  } catch {
-    return null;
+const CAMERA_ATTEMPTS = [
+  { audio: false, video: { facingMode: { exact: "environment" } } },
+  { audio: false, video: { facingMode: { ideal: "environment" } } },
+  { audio: false, video: true }
+];
+
+const parseSessionTokenFromQr = (value) => {
+  const rawValue = typeof value === "string" ? value.trim() : "";
+  if (!rawValue) return "";
+
+  if (/^https?:\/\//i.test(rawValue)) {
+    try {
+      const url = new URL(rawValue);
+      const tokenFromQuery = url.searchParams.get("token");
+      if (tokenFromQuery) return tokenFromQuery.trim();
+
+      const tokenFromHash = url.hash.replace(/^#/, "").trim();
+      if (tokenFromHash) return tokenFromHash;
+    } catch {
+      return rawValue;
+    }
   }
+
+  const queryMatch = rawValue.match(/[?&]token=([^&]+)/i);
+  if (queryMatch?.[1]) {
+    try {
+      return decodeURIComponent(queryMatch[1]).trim();
+    } catch {
+      return queryMatch[1].trim();
+    }
+  }
+
+  return rawValue;
 };
 
-const SCAN_REGION_RATIO = 0.82;
+const isNoQrError = (error) => {
+  const message = typeof error === "string" ? error : error?.message || "";
+  if (!message) return true;
+  return /no qr code found/i.test(message) || message === QrScanner.NO_QR_CODE_FOUND;
+};
+
+const stopMediaStream = (stream) => {
+  if (!stream) return;
+  stream.getTracks().forEach((track) => track.stop());
+};
 
 export const StudentScanPage = () => {
-  const { token, user } = useAuth();
+  const { token, user, logout } = useAuth();
   const videoRef = useRef(null);
-  const scannerRef = useRef(null);
+  const canvasRef = useRef(null);
+  const engineRef = useRef(null);
+  const streamRef = useRef(null);
+  const loopRef = useRef(null);
   const mountedRef = useRef(false);
-  const scanLockRef = useRef(false);
-  const [state, setState] = useState({
-    loading: false,
-    error: "",
-    result: null,
-    status: "Starting camera...",
-    cameraReady: false
-  });
+  const submittingRef = useRef(false);
 
-  const stopScanner = ({ resetLock = true } = {}) => {
-    if (resetLock) {
-      scanLockRef.current = false;
-    }
+  const [status, setStatus] = useState("Starting camera...");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-    const scanner = scannerRef.current;
-    scannerRef.current = null;
-
-    if (scanner) {
-      try {
-        scanner.stop();
-      } catch {
-        // Ignore stop errors if the scanner is already idle or still starting.
-      }
-
-      try {
-        scanner.destroy();
-      } catch {
-        // Ignore cleanup errors from partially initialized scanner instances.
-      }
-    }
-
-    const video = videoRef.current;
-    if (video?.srcObject) {
-      const tracks = video.srcObject.getTracks?.() || [];
-      tracks.forEach((track) => track.stop());
-      video.srcObject = null;
+  const clearLoop = () => {
+    if (loopRef.current) {
+      window.clearTimeout(loopRef.current);
+      loopRef.current = null;
     }
   };
 
-  const recordAttendance = async (decodedText) => {
-    scanLockRef.current = true;
-    stopScanner({ resetLock: false });
+  const stopScanner = async () => {
+    clearLoop();
 
-    const scannedSessionToken = parseSessionTokenFromQr(decodedText);
-    if (!scannedSessionToken) {
-      setState((current) => ({
-        ...current,
-        loading: false,
-        cameraReady: false,
-        status: "Only the live attendance QR works here.",
-        error: "Invalid QR code. Please scan the lecturer's live QR."
-      }));
-      scanLockRef.current = false;
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+    }
+
+    stopMediaStream(streamRef.current);
+    streamRef.current = null;
+    if (mountedRef.current) {
+      setCameraReady(false);
+    }
+  };
+
+  const destroyEngine = () => {
+    const engine = engineRef.current;
+    engineRef.current = null;
+    if (engine && typeof engine.terminate === "function") {
+      engine.terminate();
+    }
+  };
+
+  const openCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Camera access is not supported on this browser.");
+    }
+
+    let lastError = null;
+    for (const constraints of CAMERA_ATTEMPTS) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error("Unable to start camera. Please try again.");
+  };
+
+  const recordAttendance = async (sessionToken) => {
+    return apiRequest("/attendance/scan", {
+      method: "POST",
+      token,
+      body: {
+        token: sessionToken
+      }
+    });
+  };
+
+  const scanLoop = async () => {
+    if (!mountedRef.current || submittingRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || !streamRef.current) {
+      loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
       return;
     }
 
-    setState((current) => ({
-      ...current,
-      loading: true,
-      cameraReady: false,
-      status: "QR detected. Recording attendance...",
-      error: ""
-    }));
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) {
+      loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
+      return;
+    }
 
     try {
-      const result = await apiRequest("/attendance/scan", {
-        method: "POST",
-        token,
-        body: {
-          token: scannedSessionToken
-        }
+      const result = await QrScanner.scanImage(video, {
+        qrEngine: engineRef.current,
+        canvas,
+        returnDetailedScanResult: true,
+        alsoTryWithoutScanRegion: true
       });
 
-      if (!mountedRef.current) {
+      const sessionToken = parseSessionTokenFromQr(result?.data || result);
+      if (!sessionToken) {
+        loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
         return;
       }
 
-      setState({
-        loading: false,
-        error: "",
-        result,
-        status: "Attendance recorded.",
-        cameraReady: false
-      });
+      submittingRef.current = true;
+      setSubmitting(true);
+      setStatus("QR found. Recording attendance...");
+      await stopScanner();
+
+      try {
+        const response = await recordAttendance(sessionToken);
+        if (!mountedRef.current) return;
+
+        setSuccess({
+          course: response.course,
+          timestamp: response.timestamp
+        });
+        setError("");
+        setStatus("Attendance recorded.");
+      } catch (submitError) {
+        if (!mountedRef.current) return;
+
+        submittingRef.current = false;
+        setSubmitting(false);
+        const message = typeof submitError === "string" ? submitError : submitError?.message || "Unable to record attendance.";
+        setError(message);
+        setStatus("QR captured, but the attendance request failed.");
+      }
     } catch (error) {
-      if (!mountedRef.current) {
-        return;
+      if (!mountedRef.current) return;
+
+      if (!isNoQrError(error)) {
+        const message = typeof error === "string" ? error : error?.message || "Unable to read QR code.";
+        setError(message);
+        setStatus("Camera is on, keep the QR code inside the frame.");
       }
 
-      setState((current) => ({
-        ...current,
-        loading: false,
-        result: null,
-        cameraReady: false,
-        status: "Scan failed. Restarting camera...",
-        error: error.message
-      }));
-      scanLockRef.current = false;
-      void startScanner();
+      if (!submittingRef.current) {
+        setSubmitting(false);
+      }
+
+      if (!submittingRef.current) {
+        loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
+      }
     }
   };
 
   const startScanner = async () => {
-    if (!mountedRef.current || !videoRef.current) {
-      return;
-    }
+    setError("");
+    setSuccess(null);
+    setStatus("Starting camera...");
+    submittingRef.current = false;
+    setSubmitting(false);
 
-    stopScanner();
-
-    setState((current) => ({
-      ...current,
-      loading: false,
-      cameraReady: false,
-      status: "Opening the back camera...",
-      error: ""
-    }));
+    await stopScanner();
 
     try {
-      const scanner = new QrScanner(
-        videoRef.current,
-        (result) => {
-          if (!mountedRef.current || scanLockRef.current) {
-            return;
-          }
-
-          void recordAttendance(result.data);
-        },
-        {
-          returnDetailedScanResult: true,
-          preferredCamera: "environment",
-          maxScansPerSecond: 18,
-          highlightScanRegion: true,
-          highlightCodeOutline: true,
-          calculateScanRegion: (video) => {
-            const size = Math.round(Math.min(video.videoWidth, video.videoHeight) * SCAN_REGION_RATIO);
-            return {
-              x: Math.round((video.videoWidth - size) / 2),
-              y: Math.round((video.videoHeight - size) / 2),
-              width: size,
-              height: size,
-              downScaledWidth: 960,
-              downScaledHeight: 960
-            };
-          },
-          onDecodeError: () => {}
-        }
-      );
-
-      scannerRef.current = scanner;
-
-      await scanner.start();
-
+      const stream = await openCamera();
       if (!mountedRef.current) {
-        stopScanner({ resetLock: false });
+        stopMediaStream(stream);
         return;
       }
 
-      setState((current) => ({
-        ...current,
-        cameraReady: true,
-        status: "Camera live. Hold the QR inside the box."
-      }));
+      streamRef.current = stream;
+      const video = videoRef.current;
+      if (!video) {
+        stopMediaStream(stream);
+        throw new Error("Camera preview is unavailable.");
+      }
+
+      video.srcObject = stream;
+      await video.play();
+
+      if (!engineRef.current) {
+        engineRef.current = await QrScanner.createQrEngine();
+      }
+
+      if (!mountedRef.current) return;
+
+      setCameraReady(true);
+      setStatus("Point the QR code at the frame.");
+      loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
     } catch (error) {
-      stopScanner({ resetLock: false });
+      await stopScanner();
+      destroyEngine();
+      if (!mountedRef.current) return;
 
-      const message =
-        error?.name === "NotAllowedError"
-          ? "Camera permission was denied. Allow camera access and try again."
-          : error?.name === "NotFoundError"
-            ? "No camera was found on this device."
-            : error?.message || String(error) || "Unable to start the camera. Try again.";
-
-      setState((current) => ({
-        ...current,
-        loading: false,
-        cameraReady: false,
-        status: "Camera could not be started.",
-        error: message
-      }));
+      const message = typeof error === "string" ? error : error?.message || "Unable to start camera.";
+      setError(message);
+      setStatus("Camera could not be started.");
     }
   };
 
   useEffect(() => {
     mountedRef.current = true;
-    void startScanner();
+    startScanner();
 
     return () => {
       mountedRef.current = false;
-      stopScanner();
+      clearLoop();
+      stopMediaStream(streamRef.current);
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.srcObject = null;
+      }
+      streamRef.current = null;
+      destroyEngine();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleRestart = async () => {
+    await startScanner();
+  };
+
+  const courseLabel = success?.course
+    ? `${success.course.courseCode || ""}${success.course.courseCode && success.course.courseTitle ? " - " : ""}${success.course.courseTitle || ""}`.trim()
+    : "";
 
   return (
     <div className="student-scan">
-      <div className="student-scan__header">
+      <header className="student-scan__header">
         <div>
-          <strong>{user.name}</strong>
-          <span>{user.matricNo}</span>
+          <strong>Student Scan</strong>
+          <span>{user?.name || "Ready to record attendance"}</span>
         </div>
-      </div>
-      <div className="student-scan__body">
-        <div className="section-head">
-          <span>Scan QR Code</span>
-        </div>
-        <p className="muted">Use your back camera and keep the QR fully inside the box.</p>
+        <button className="btn btn-secondary" type="button" onClick={logout}>
+          Logout
+        </button>
+      </header>
 
-        {!state.result ? (
-          <>
-            <div className="scan-container">
-              <div className="scan-frame">
-                <video ref={videoRef} className="scan-video" autoPlay muted playsInline />
-                <div className="scan-frame__guide" />
+      <main className="student-scan__body">
+        <div className="section-head">
+          <span>{success ? "Attendance captured" : "Scan the QR code"}</span>
+        </div>
+
+        <p className="muted">
+          {success
+            ? "You are marked present for this session."
+            : "Keep the QR code inside the frame and hold the phone steady."}
+        </p>
+
+        {error ? <div className="error-text">{error}</div> : null}
+
+        {success ? (
+          <div className="success-block">
+            <h1>Attendance recorded</h1>
+            {courseLabel ? <p>{courseLabel}</p> : null}
+            <p>{success.timestamp ? new Date(success.timestamp).toLocaleTimeString() : "Recorded just now"}</p>
+          </div>
+        ) : (
+          <div className="scan-container">
+            <div className="scan-frame">
+              <div className="scan-surface">
+                <video
+                  ref={videoRef}
+                  className="scan-video"
+                  autoPlay
+                  muted
+                  playsInline
+                />
+                <canvas ref={canvasRef} className="scan-canvas" />
               </div>
-              {state.loading ? (
+              <div className="scan-frame__guide" />
+              {!cameraReady ? (
                 <div className="scan-overlay">
-                  <div className="scan-loading">Processing...</div>
+                  <div className="scan-loading">{status}</div>
                 </div>
               ) : null}
             </div>
-            <p className="scan-status">{state.status}</p>
-            <div className="scan-actions">
-              <button className="btn btn-secondary" onClick={() => void startScanner()}>
-                Restart Camera
-              </button>
-            </div>
-          </>
-        ) : null}
-
-        {state.error ? <p className="error-text">{state.error}</p> : null}
-
-        {state.result ? (
-          <div className="success-block">
-            <h1>Attendance Recorded</h1>
-            <p>
-              {state.result.course.courseCode} - {state.result.course.courseTitle}
-            </p>
-            <p>{new Date(state.result.timestamp).toLocaleString()}</p>
-            <button
-              className="btn btn-secondary"
-              onClick={() => {
-                setState({
-                  loading: false,
-                  error: "",
-                  result: null,
-                  status: "Starting camera...",
-                  cameraReady: false
-                });
-                void startScanner();
-              }}
-            >
-              Scan Another Code
-            </button>
           </div>
-        ) : null}
-      </div>
+        )}
+
+        <p className="scan-status">{status}</p>
+
+        <div className="scan-actions">
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={handleRestart}
+            disabled={submitting}
+          >
+            {success ? "Scan another code" : "Restart camera"}
+          </button>
+        </div>
+      </main>
     </div>
   );
 };
