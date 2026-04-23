@@ -60,6 +60,7 @@ export const StudentScanPage = () => {
   const loopRef = useRef(null);
   const mountedRef = useRef(false);
   const submittingRef = useRef(false);
+  const scanInProgressRef = useRef(false);
 
   const [status, setStatus] = useState("Starting camera...");
   const [error, setError] = useState("");
@@ -125,22 +126,22 @@ export const StudentScanPage = () => {
     });
   };
 
-  const scanLoop = async () => {
-    if (!mountedRef.current || submittingRef.current) return;
+  const decodeCurrentFrame = async ({ snapshot = false } = {}) => {
+    if (!mountedRef.current || submittingRef.current || scanInProgressRef.current) return false;
+
+    scanInProgressRef.current = true;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas || !streamRef.current) {
-      loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
-      return;
-    }
-
-    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) {
-      loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
-      return;
-    }
-
     try {
+      if (!video || !canvas || !streamRef.current) {
+        return false;
+      }
+
+      if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth || !video.videoHeight) {
+        return false;
+      }
+
       const result = await QrScanner.scanImage(video, {
         qrEngine: engineRef.current,
         canvas,
@@ -150,8 +151,7 @@ export const StudentScanPage = () => {
 
       const sessionToken = parseSessionTokenFromQr(result?.data || result);
       if (!sessionToken) {
-        loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
-        return;
+        return false;
       }
 
       submittingRef.current = true;
@@ -169,6 +169,7 @@ export const StudentScanPage = () => {
         });
         setError("");
         setStatus("Attendance recorded.");
+        return true;
       } catch (submitError) {
         if (!mountedRef.current) return;
 
@@ -177,6 +178,7 @@ export const StudentScanPage = () => {
         const message = typeof submitError === "string" ? submitError : submitError?.message || "Unable to record attendance.";
         setError(message);
         setStatus("QR captured, but the attendance request failed.");
+        return false;
       }
     } catch (error) {
       if (!mountedRef.current) return;
@@ -184,16 +186,29 @@ export const StudentScanPage = () => {
       if (!isNoQrError(error)) {
         const message = typeof error === "string" ? error : error?.message || "Unable to read QR code.";
         setError(message);
-        setStatus("Camera is on, keep the QR code inside the frame.");
+        setStatus(snapshot ? "Snapshot failed. Try again." : "Camera is on, keep the QR code inside the frame.");
+      } else if (snapshot) {
+        setStatus("No QR code found in the snapshot.");
       }
 
       if (!submittingRef.current) {
         setSubmitting(false);
       }
 
-      if (!submittingRef.current) {
-        loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
-      }
+      return false;
+    } finally {
+      scanInProgressRef.current = false;
+    }
+  };
+
+  const scanLoop = async () => {
+    if (!mountedRef.current || submittingRef.current) return;
+
+    const decoded = await decodeCurrentFrame();
+    if (!mountedRef.current || submittingRef.current) return;
+
+    if (!decoded) {
+      loopRef.current = window.setTimeout(scanLoop, SCAN_DELAY_MS);
     }
   };
 
@@ -265,6 +280,18 @@ export const StudentScanPage = () => {
     await startScanner();
   };
 
+  const handleSnapScan = async () => {
+    if (!cameraReady || submittingRef.current) return;
+
+    setError("");
+    setStatus("Taking a snapshot...");
+
+    const decoded = await decodeCurrentFrame({ snapshot: true });
+    if (!decoded && mountedRef.current) {
+      setStatus("No QR found yet. Try snapping again or hold the code steady.");
+    }
+  };
+
   const courseLabel = success?.course
     ? `${success.course.courseCode || ""}${success.course.courseCode && success.course.courseTitle ? " - " : ""}${success.course.courseTitle || ""}`.trim()
     : "";
@@ -326,14 +353,24 @@ export const StudentScanPage = () => {
         <p className="scan-status">{status}</p>
 
         <div className="scan-actions">
-          <button
-            className="btn btn-secondary"
-            type="button"
-            onClick={handleRestart}
-            disabled={submitting}
-          >
-            {success ? "Scan another code" : "Restart camera"}
-          </button>
+          <div className="scan-actions__group">
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={handleSnapScan}
+              disabled={submitting || !cameraReady || !!success}
+            >
+              Snap QR
+            </button>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={handleRestart}
+              disabled={submitting}
+            >
+              {success ? "Scan another code" : "Restart camera"}
+            </button>
+          </div>
         </div>
       </main>
     </div>

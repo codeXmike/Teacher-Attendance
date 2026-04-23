@@ -1527,6 +1527,13 @@ label {
   justify-content: center;
 }
 
+.scan-actions__group {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 .success-block {
   background: #111111;
   border: 2px solid #333333;
