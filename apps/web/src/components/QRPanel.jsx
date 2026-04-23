@@ -55,7 +55,14 @@ export const QRPanel = ({ session, selectedCourse, onRefresh, isRefreshing }) =>
           {session?.token ? (
             <>
               <div className="qr-frame">
-                <QRCodeSVG value={qrPayload} size={180} bgColor="#111827" fgColor="#f9fafb" level="H" />
+                <QRCodeSVG
+                  value={qrPayload}
+                  size={180}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  level="H"
+                  includeMargin
+                />
               </div>
               <div className="qr-meta">
                 <span className="qr-meta__code">{selectedCourse?.courseCode}</span>
@@ -83,7 +90,14 @@ export const QRPanel = ({ session, selectedCourse, onRefresh, isRefreshing }) =>
             </div>
             <div className="qr-modal__body">
               <div className="qr-modal__frame">
-                <QRCodeSVG value={qrPayload} size={300} bgColor="#111827" fgColor="#f9fafb" level="H" />
+                <QRCodeSVG
+                  value={qrPayload}
+                  size={300}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  level="H"
+                  includeMargin
+                />
               </div>
               <div className="qr-modal__info">
                 <div className="qr-modal__code">{selectedCourse?.courseCode}</div>

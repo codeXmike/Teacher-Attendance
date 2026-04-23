@@ -696,7 +696,7 @@ label {
 }
 
 .qr-modal__frame {
-  background: var(--gray-900);
+  background: #ffffff;
   padding: 1.5rem;
   border-radius: var(--radius-lg);
   display: inline-block;
@@ -766,10 +766,11 @@ label {
 }
 
 .qr-frame {
-  background: var(--gray-900);
+  background: #ffffff;
   padding: 1rem;
   border-radius: var(--radius);
   display: inline-block;
+  box-shadow: var(--shadow-sm);
 }
 
 .qr-meta {
