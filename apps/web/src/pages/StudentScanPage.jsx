@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BarcodeFormat, BrowserMultiFormatReader, DecodeHintType } from "@zxing/library";
+import QrScanner from "qr-scanner";
 import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
@@ -17,26 +17,12 @@ const parseSessionTokenFromQr = (decodedText) => {
   }
 };
 
-const hasNativeQrDetector = () =>
-  typeof window !== "undefined" && typeof window.BarcodeDetector !== "undefined";
-
-const isIosDevice = () => {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-
-  const userAgent = navigator.userAgent || "";
-  return /iPad|iPhone|iPod/i.test(userAgent) || (userAgent.includes("Mac") && navigator.maxTouchPoints > 1);
-};
+const SCAN_REGION_RATIO = 0.82;
 
 export const StudentScanPage = () => {
   const { token, user } = useAuth();
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const readerRef = useRef(null);
-  const detectorRef = useRef(null);
-  const animationFrameRef = useRef(null);
-  const manualScanTimeoutRef = useRef(null);
+  const scannerRef = useRef(null);
   const mountedRef = useRef(false);
   const scanLockRef = useRef(false);
   const [state, setState] = useState({
@@ -46,29 +32,28 @@ export const StudentScanPage = () => {
     status: "Starting camera...",
     cameraReady: false
   });
-  const useIosScanner = isIosDevice();
 
   const stopScanner = ({ resetLock = true } = {}) => {
     if (resetLock) {
       scanLockRef.current = false;
     }
 
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
+    const scanner = scannerRef.current;
+    scannerRef.current = null;
 
-    if (manualScanTimeoutRef.current) {
-      clearTimeout(manualScanTimeoutRef.current);
-      manualScanTimeoutRef.current = null;
-    }
+    if (scanner) {
+      try {
+        scanner.stop();
+      } catch {
+        // Ignore stop errors if the scanner is already idle or still starting.
+      }
 
-    if (readerRef.current) {
-      readerRef.current.reset();
-      readerRef.current = null;
+      try {
+        scanner.destroy();
+      } catch {
+        // Ignore cleanup errors from partially initialized scanner instances.
+      }
     }
-
-    detectorRef.current = null;
 
     const video = videoRef.current;
     if (video?.srcObject) {
@@ -141,118 +126,8 @@ export const StudentScanPage = () => {
     }
   };
 
-  const startNativeScanLoop = () => {
-    if (!detectorRef.current || !videoRef.current || !canvasRef.current) {
-      return;
-    }
-
-    const loop = async () => {
-      if (!mountedRef.current || scanLockRef.current) {
-        return;
-      }
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-
-      if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
-        animationFrameRef.current = requestAnimationFrame(loop);
-        return;
-      }
-
-      const context = canvas.getContext("2d", { willReadFrequently: true });
-      if (!context) {
-        animationFrameRef.current = requestAnimationFrame(loop);
-        return;
-      }
-
-      const sourceSize = Math.min(video.videoWidth, video.videoHeight);
-      const cropSize = Math.floor(sourceSize * 0.82);
-      const sx = Math.floor((video.videoWidth - cropSize) / 2);
-      const sy = Math.floor((video.videoHeight - cropSize) / 2);
-
-      canvas.width = 640;
-      canvas.height = 640;
-      context.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
-
-      try {
-        const detections = await detectorRef.current.detect(canvas);
-        const qrText = detections?.[0]?.rawValue;
-        if (qrText) {
-          await recordAttendance(qrText);
-          return;
-        }
-      } catch {
-        // Keep scanning; a failed frame is normal while the QR is moving.
-      }
-
-      animationFrameRef.current = requestAnimationFrame(loop);
-    };
-
-    animationFrameRef.current = requestAnimationFrame(loop);
-  };
-
-  const startManualIosScanLoop = () => {
-    if (!readerRef.current || !videoRef.current || !canvasRef.current) {
-      return;
-    }
-
-    const loop = () => {
-      if (!mountedRef.current || scanLockRef.current) {
-        return;
-      }
-
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-
-      if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
-        manualScanTimeoutRef.current = window.setTimeout(loop, 120);
-        return;
-      }
-
-      const context = canvas.getContext("2d", { willReadFrequently: true });
-      if (!context) {
-        manualScanTimeoutRef.current = window.setTimeout(loop, 120);
-        return;
-      }
-
-      const sourceSize = Math.min(video.videoWidth, video.videoHeight);
-      const cropSize = Math.floor(sourceSize * 0.92);
-      const sx = Math.floor((video.videoWidth - cropSize) / 2);
-      const sy = Math.floor((video.videoHeight - cropSize) / 2);
-
-      canvas.width = 1280;
-      canvas.height = 1280;
-      context.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
-
-      try {
-        const result = readerRef.current.decode(canvas);
-        const qrText = result?.getText?.() || "";
-        if (qrText) {
-          void recordAttendance(qrText);
-          return;
-        }
-      } catch {
-        // Keep scanning; iPhone WebKit can be noisy while the QR is moving.
-      }
-
-      manualScanTimeoutRef.current = window.setTimeout(loop, 120);
-    };
-
-    manualScanTimeoutRef.current = window.setTimeout(loop, 120);
-  };
-
   const startScanner = async () => {
-    if (!mountedRef.current) {
-      return;
-    }
-
-    if (!videoRef.current || !navigator.mediaDevices?.getUserMedia) {
-      setState((current) => ({
-        ...current,
-        cameraReady: false,
-        status: "This browser cannot open the camera.",
-        error: "Camera access is not supported on this device."
-      }));
+    if (!mountedRef.current || !videoRef.current) {
       return;
     }
 
@@ -267,127 +142,53 @@ export const StudentScanPage = () => {
     }));
 
     try {
-      if (useIosScanner) {
-        let stream = null;
-
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: {
-              facingMode: { exact: "environment" },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 }
-            }
-          });
-        } catch {
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: false,
-              video: {
-                facingMode: { ideal: "environment" },
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
-              }
-            });
-          } catch {
-            stream = await navigator.mediaDevices.getUserMedia({
-              audio: false,
-              video: true
-            });
+      const scanner = new QrScanner(
+        videoRef.current,
+        (result) => {
+          if (!mountedRef.current || scanLockRef.current) {
+            return;
           }
+
+          void recordAttendance(result.data);
+        },
+        {
+          returnDetailedScanResult: true,
+          preferredCamera: "environment",
+          maxScansPerSecond: 18,
+          highlightScanRegion: true,
+          highlightCodeOutline: true,
+          calculateScanRegion: (video) => {
+            const size = Math.round(Math.min(video.videoWidth, video.videoHeight) * SCAN_REGION_RATIO);
+            return {
+              x: Math.round((video.videoWidth - size) / 2),
+              y: Math.round((video.videoHeight - size) / 2),
+              width: size,
+              height: size,
+              downScaledWidth: 960,
+              downScaledHeight: 960
+            };
+          },
+          onDecodeError: () => {}
         }
+      );
 
-        if (!mountedRef.current || !videoRef.current) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
+      scannerRef.current = scanner;
 
-        const video = videoRef.current;
-        video.srcObject = stream;
-        video.muted = true;
-        video.playsInline = true;
-        video.setAttribute("playsinline", "true");
-        video.setAttribute("webkit-playsinline", "true");
-        await video.play();
+      await scanner.start();
 
-        const hints = new Map();
-        hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
-        readerRef.current = new BrowserMultiFormatReader(hints, 100);
-
-        if (!mountedRef.current) {
-          stopScanner({ resetLock: false });
-          return;
-        }
-
-        setState((current) => ({
-          ...current,
-          cameraReady: true,
-          status: "Camera live. Hold the QR inside the box."
-        }));
-        startManualIosScanLoop();
+      if (!mountedRef.current) {
+        stopScanner({ resetLock: false });
         return;
       }
-
-      let stream = null;
-
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: { exact: "environment" } }
-        });
-      } catch {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: { facingMode: { ideal: "environment" } }
-          });
-        } catch {
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: true
-          });
-        }
-      }
-
-      if (!mountedRef.current || !videoRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-
-      const video = videoRef.current;
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
-      video.setAttribute("playsinline", "true");
-      video.setAttribute("webkit-playsinline", "true");
-      await video.play();
 
       setState((current) => ({
         ...current,
         cameraReady: true,
         status: "Camera live. Hold the QR inside the box."
       }));
-
-      if (hasNativeQrDetector()) {
-        detectorRef.current = new window.BarcodeDetector({ formats: ["qr_code"] });
-        startNativeScanLoop();
-        return;
-      }
-
-      const hints = new Map();
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
-
-      const reader = new BrowserMultiFormatReader(hints, 100);
-      readerRef.current = reader;
-
-      void reader.decodeFromVideoElementContinuously(video, (result) => {
-        if (!mountedRef.current || scanLockRef.current || !result) {
-          return;
-        }
-
-        void recordAttendance(result.getText());
-      });
     } catch (error) {
+      stopScanner({ resetLock: false });
+
       const message =
         error?.name === "NotAllowedError"
           ? "Camera permission was denied. Allow camera access and try again."
@@ -433,9 +234,8 @@ export const StudentScanPage = () => {
           <>
             <div className="scan-container">
               <div className="scan-frame">
-                <video ref={videoRef} className="scan-video" autoPlay muted playsInline webkit-playsinline="true" />
+                <video ref={videoRef} className="scan-video" autoPlay muted playsInline />
                 <div className="scan-frame__guide" />
-                <canvas ref={canvasRef} className="scan-canvas" aria-hidden="true" />
               </div>
               {state.loading ? (
                 <div className="scan-overlay">
