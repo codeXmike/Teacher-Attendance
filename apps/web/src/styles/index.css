@@ -890,13 +890,25 @@ label {
   overflow-y: auto;
 }
 
+.session-row--with-action {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  border-bottom: 1px solid var(--gray-100);
+}
+
 .session-row {
   width: 100%;
   text-align: left;
   padding: 0.875rem 1.25rem;
-  border-bottom: 1px solid var(--gray-100);
   transition: all 0.2s ease;
   cursor: pointer;
+}
+
+.session-row__main {
+  text-align: left;
+  padding: 0.875rem 1.25rem;
+  border-radius: 0;
 }
 
 .session-row:hover {
@@ -906,6 +918,20 @@ label {
 .session-row--active {
   background: var(--primary-light);
   border-left: 3px solid var(--primary);
+}
+
+.session-row__trash {
+  width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--danger);
+  border-left: 1px solid var(--gray-100);
+  border-radius: 0;
+}
+
+.session-row__trash:hover:not(:disabled) {
+  background: var(--danger-light);
 }
 
 .session-row__code {
@@ -924,6 +950,52 @@ label {
 .session-row__count {
   font-size: 0.75rem;
   color: var(--gray-400);
+}
+
+.action-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+
+.action-modal {
+  width: min(100%, 420px);
+  background: white;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--gray-200);
+}
+
+.action-modal__header,
+.action-modal__body,
+.action-modal__footer {
+  padding: 1rem 1.25rem;
+}
+
+.action-modal__header {
+  border-bottom: 1px solid var(--gray-100);
+}
+
+.action-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.action-modal__body p {
+  color: var(--gray-600);
+}
+
+.action-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  border-top: 1px solid var(--gray-100);
 }
 /* Attendance Summary Page */
 .page-summary {

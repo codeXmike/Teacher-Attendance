@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiRequest } from "../api/client";
+import { ActionModal } from "../components/ActionModal";
 import { LecturerShell } from "../components/LecturerShell";
 import { useAuth } from "../context/AuthContext";
 import { useLecturerWorkspace } from "../hooks/useLecturerWorkspace";
+
+const TrashIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18" />
+    <path d="M8 6V4h8v2" />
+    <path d="M19 6l-1 14H6L5 6" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+  </svg>
+);
 
 export const LecturerRecordsPage = () => {
   const { token, user, logout } = useAuth();
@@ -12,72 +23,103 @@ export const LecturerRecordsPage = () => {
   const [records, setRecords] = useState([]);
   const [availableStudents, setAvailableStudents] = useState([]);
   const [studentSearch, setStudentSearch] = useState("");
-  const [addingStudent, setAddingStudent] = useState(false);
+  const [addingStudentId, setAddingStudentId] = useState("");
+  const [busyDeleteSessionId, setBusyDeleteSessionId] = useState("");
+  const [removingAttendanceId, setRemovingAttendanceId] = useState("");
+  const [pendingAttendanceDelete, setPendingAttendanceDelete] = useState(null);
+  const [pendingSessionDelete, setPendingSessionDelete] = useState(null);
 
   const selectedSession = useMemo(
-    () => sessions.find((s) => s.id === selectedSessionId) || null,
+    () => sessions.find((session) => session.id === selectedSessionId) || null,
     [sessions, selectedSessionId]
   );
 
+  const loadSessions = async () => {
+    try {
+      const query = selectedCourseId ? `?courseId=${selectedCourseId}` : "";
+      const data = await apiRequest(`/session${query}`, { token });
+      setSessions(data);
+      setSelectedSessionId((current) => (data.some((session) => session.id === current) ? current : data[0]?.id || ""));
+      setError("");
+    } catch (nextError) {
+      setError(nextError.message);
+    }
+  };
+
+  const loadRecords = async () => {
+    if (!selectedSessionId) {
+      setRecords([]);
+      return;
+    }
+
+    try {
+      const data = await apiRequest(`/attendance/session/${selectedSessionId}`, { token });
+      setRecords(data.rows);
+      setSessions((current) => current.map((session) => (
+        session.id === selectedSessionId
+          ? {
+              ...session,
+              attendanceCount: data.rows.length,
+              studentLimit: data.session?.studentLimit ?? session.studentLimit,
+              isActive: data.session?.isActive ?? session.isActive
+            }
+          : session
+      )));
+      setError("");
+    } catch (nextError) {
+      setError(nextError.message);
+    }
+  };
+
   useEffect(() => {
-    const load = async () => {
-      try {
-        const query = selectedCourseId ? `?courseId=${selectedCourseId}` : "";
-        const data = await apiRequest(`/session${query}`, { token });
-        setSessions(data);
-        setSelectedSessionId((curr) =>
-          data.some((s) => s.id === curr) ? curr : data[0]?.id || ""
-        );
-        setError("");
-      } catch (err) {
-        setError(err.message);
-      }
-    };
-    load();
+    loadSessions();
   }, [selectedCourseId, token]);
 
   useEffect(() => {
-    if (!selectedSessionId) { setRecords([]); return; }
-    const load = async () => {
-      try {
-        const data = await apiRequest(`/attendance/session/${selectedSessionId}`, { token });
-        setRecords(data.rows);
-        setError("");
-      } catch (err) {
-        setError(err.message);
-      }
-    };
-    load();
+    loadRecords();
   }, [selectedSessionId, token]);
 
-  const deleteAttendance = async (attendanceId) => {
+  const deleteAttendance = async () => {
+    if (!pendingAttendanceDelete) return;
+
     try {
-      await apiRequest(`/attendance/${attendanceId}`, { method: "DELETE", token });
-      setRecords((curr) => curr.filter((row) => row.id !== attendanceId));
+      setRemovingAttendanceId(pendingAttendanceDelete.id);
+      await apiRequest(`/attendance/${pendingAttendanceDelete.id}`, { method: "DELETE", token });
+      setRecords((current) => current.filter((row) => row.id !== pendingAttendanceDelete.id));
+      setSessions((current) => current.map((session) => (
+        session.id === selectedSessionId
+          ? { ...session, attendanceCount: Math.max((session.attendanceCount ?? 1) - 1, 0) }
+          : session
+      )));
+      setPendingAttendanceDelete(null);
       setError("");
-    } catch (err) {
-      setError(err.message);
+    } catch (nextError) {
+      setError(nextError.message);
+    } finally {
+      setRemovingAttendanceId("");
     }
   };
 
   const searchStudents = async (query) => {
     setStudentSearch(query);
     if (!selectedSessionId) return;
+
     if (!query.trim()) {
       setAvailableStudents([]);
       return;
     }
+
     try {
-      const data = await apiRequest(`/attendance/available/students?sessionId=${selectedSessionId}&searchQuery=${query}`, { token });
+      const data = await apiRequest(`/attendance/available/students?sessionId=${selectedSessionId}&searchQuery=${encodeURIComponent(query)}`, { token });
       setAvailableStudents(data);
-    } catch (err) {
-      console.error("Failed to search students:", err);
+    } catch (nextError) {
+      console.error("Failed to search students:", nextError);
     }
   };
 
   const addStudentManually = async (studentId) => {
     try {
-      setAddingStudent(true);
+      setAddingStudentId(studentId);
       await apiRequest("/attendance/manual", {
         method: "POST",
         token,
@@ -85,17 +127,42 @@ export const LecturerRecordsPage = () => {
       });
       setStudentSearch("");
       setAvailableStudents([]);
+      await loadRecords();
+      await loadSessions();
       setError("");
-    } catch (err) {
-      setError(err.message);
+    } catch (nextError) {
+      setError(nextError.message);
     } finally {
-      setAddingStudent(false);
+      setAddingStudentId("");
+    }
+  };
+
+  const deleteSession = async () => {
+    if (!pendingSessionDelete) return;
+
+    try {
+      setBusyDeleteSessionId(pendingSessionDelete.id);
+      await apiRequest(`/session/${pendingSessionDelete.id}`, { method: "DELETE", token });
+      const nextSessions = sessions.filter((session) => session.id !== pendingSessionDelete.id);
+      setSessions(nextSessions);
+      setSelectedSessionId((current) => (current === pendingSessionDelete.id ? nextSessions[0]?.id || "" : current));
+      if (selectedSessionId === pendingSessionDelete.id) {
+        setRecords([]);
+        setStudentSearch("");
+        setAvailableStudents([]);
+      }
+      setPendingSessionDelete(null);
+      setError("");
+    } catch (nextError) {
+      setError(nextError.message);
+    } finally {
+      setBusyDeleteSessionId("");
     }
   };
 
   return (
     <LecturerShell user={user} onLogout={logout} title="Records">
-      {error && <div className="shell-banner shell-banner--error">{error}</div>}
+      {error ? <div className="shell-banner shell-banner--error">{error}</div> : null}
 
       <div className="page-records">
         <div className="records-bar">
@@ -104,10 +171,12 @@ export const LecturerRecordsPage = () => {
             <select
               className="field__select"
               value={selectedCourseId}
-              onChange={(e) => setSelectedCourseId(e.target.value)}
+              onChange={(event) => setSelectedCourseId(event.target.value)}
             >
-              {courses.map((c) => (
-                <option key={c._id} value={c._id}>{c.courseCode} — {c.courseTitle}</option>
+              {courses.map((course) => (
+                <option key={course._id} value={course._id}>
+                  {course.courseCode} - {course.courseTitle}
+                </option>
               ))}
             </select>
           </div>
@@ -119,18 +188,37 @@ export const LecturerRecordsPage = () => {
               <span className="pane__title">Sessions</span>
               <span className="badge">{sessions.length}</span>
             </div>
+
             <div className="session-list">
-              {sessions.length === 0 && <p className="empty-hint">No sessions found.</p>}
-              {sessions.map((s) => (
-                <button
-                  key={s.id}
-                  className={`session-row ${selectedSessionId === s.id ? "session-row--active" : ""}`}
-                  onClick={() => setSelectedSessionId(s.id)}
+              {sessions.length === 0 ? <p className="empty-hint">No sessions found.</p> : null}
+
+              {sessions.map((session) => (
+                <div
+                  key={session.id}
+                  className={`session-row session-row--with-action ${selectedSessionId === session.id ? "session-row--active" : ""}`}
                 >
-                  <span className="session-row__code">{s.course?.courseCode || "—"}</span>
-                  <span className="session-row__date">{new Date(s.createdAt).toLocaleString()}</span>
-                  <span className="session-row__count">{s.attendanceCount} students</span>
-                </button>
+                  <button
+                    className="session-row__main"
+                    type="button"
+                    onClick={() => setSelectedSessionId(session.id)}
+                  >
+                    <span className="session-row__code">{session.course?.courseCode || "-"}</span>
+                    <span className="session-row__date">{new Date(session.createdAt).toLocaleString()}</span>
+                    <span className="session-row__count">
+                      {session.attendanceCount} / {session.studentLimit} students
+                    </span>
+                  </button>
+
+                  <button
+                    className="session-row__trash"
+                    type="button"
+                    title="Delete session"
+                    disabled={busyDeleteSessionId === session.id}
+                    onClick={() => setPendingSessionDelete(session)}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -142,9 +230,13 @@ export const LecturerRecordsPage = () => {
                   ? `${selectedSession.course?.courseCode} · ${new Date(selectedSession.createdAt).toLocaleDateString()}`
                   : "Students"}
               </span>
-              <span className="badge">{records.length}</span>
+              <span className="badge">
+                {records.length}
+                {selectedSession?.studentLimit ? ` / ${selectedSession.studentLimit}` : ""}
+              </span>
             </div>
-            {selectedSessionId && (
+
+            {selectedSessionId && !selectedSession?.isActive ? (
               <div style={{ padding: "12px", borderBottom: "1px solid #e5e7eb", position: "relative" }}>
                 <label style={{ display: "block", marginBottom: "8px", fontSize: "12px", color: "#666" }}>
                   Add student to this session
@@ -154,7 +246,7 @@ export const LecturerRecordsPage = () => {
                     type="text"
                     placeholder="Search by name or matric no..."
                     value={studentSearch}
-                    onChange={(e) => searchStudents(e.target.value)}
+                    onChange={(event) => searchStudents(event.target.value)}
                     style={{
                       flex: 1,
                       padding: "8px",
@@ -163,8 +255,9 @@ export const LecturerRecordsPage = () => {
                       fontSize: "14px"
                     }}
                   />
-                  {studentSearch && (
+                  {studentSearch ? (
                     <button
+                      type="button"
                       onClick={() => {
                         setStudentSearch("");
                         setAvailableStudents([]);
@@ -178,11 +271,12 @@ export const LecturerRecordsPage = () => {
                         padding: "0 4px"
                       }}
                     >
-                      ✕
+                      x
                     </button>
-                  )}
+                  ) : null}
                 </div>
-                {availableStudents.length > 0 && (
+
+                {availableStudents.length > 0 ? (
                   <div
                     style={{
                       position: "absolute",
@@ -204,16 +298,9 @@ export const LecturerRecordsPage = () => {
                         style={{
                           padding: "10px 12px",
                           borderBottom: "1px solid #f3f4f6",
-                          cursor: "pointer",
                           display: "flex",
                           justifyContent: "space-between",
                           alignItems: "center"
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = "#f9fafb";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = "transparent";
                         }}
                       >
                         <div>
@@ -221,8 +308,9 @@ export const LecturerRecordsPage = () => {
                           <div style={{ fontSize: "12px", color: "#666" }}>{student.matricNo}</div>
                         </div>
                         <button
+                          type="button"
                           onClick={() => addStudentManually(student._id)}
-                          disabled={addingStudent}
+                          disabled={!!addingStudentId}
                           style={{
                             padding: "4px 8px",
                             background: "#2563eb",
@@ -233,14 +321,21 @@ export const LecturerRecordsPage = () => {
                             fontSize: "12px"
                           }}
                         >
-                          {addingStudent ? "Adding..." : "Add"}
+                          {addingStudentId === student._id ? "Adding..." : "Add"}
                         </button>
                       </div>
                     ))}
                   </div>
-                )}
+                ) : null}
               </div>
-            )}
+            ) : null}
+
+            {selectedSessionId && selectedSession?.isActive ? (
+              <p className="empty-hint" style={{ padding: "12px", borderBottom: "1px solid #e5e7eb" }}>
+                End the session before adding students manually.
+              </p>
+            ) : null}
+
             <div className="table-wrap">
               <table className="att-table">
                 <thead>
@@ -260,7 +355,8 @@ export const LecturerRecordsPage = () => {
                       <td style={{ textAlign: "center" }}>
                         <button
                           className="icon-button"
-                          onClick={() => deleteAttendance(row.id)}
+                          type="button"
+                          onClick={() => setPendingAttendanceDelete(row)}
                           title="Remove from attendance"
                           style={{
                             background: "none",
@@ -271,22 +367,45 @@ export const LecturerRecordsPage = () => {
                             padding: "4px"
                           }}
                         >
-                          🗑
+                          <TrashIcon />
                         </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {records.length === 0 && (
+
+              {records.length === 0 ? (
                 <p className="empty-hint">
                   {selectedSessionId ? "No records for this session." : "Select a session to view records."}
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
       </div>
+
+      <ActionModal
+        open={!!pendingAttendanceDelete}
+        title="Remove student"
+        message="Remove this student from the attendance record for this session?"
+        confirmLabel="Remove"
+        confirmVariant="danger"
+        onConfirm={deleteAttendance}
+        onCancel={() => setPendingAttendanceDelete(null)}
+        busy={removingAttendanceId === pendingAttendanceDelete?.id}
+      />
+
+      <ActionModal
+        open={!!pendingSessionDelete}
+        title="Delete session"
+        message="Delete this session and all attendance under it? This cannot be undone."
+        confirmLabel="Delete session"
+        confirmVariant="danger"
+        onConfirm={deleteSession}
+        onCancel={() => setPendingSessionDelete(null)}
+        busy={busyDeleteSessionId === pendingSessionDelete?.id}
+      />
     </LecturerShell>
   );
 };

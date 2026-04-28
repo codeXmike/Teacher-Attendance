@@ -1,311 +1,235 @@
 import { useEffect, useMemo, useState } from "react";
 import { io } from "socket.io-client";
 import { apiRequest, getApiUrl } from "../api/client";
+import { ActionModal } from "../components/ActionModal";
 import { LecturerShell } from "../components/LecturerShell";
+import { QRPanel } from "../components/QRPanel";
 import { useAuth } from "../context/AuthContext";
 import { useLecturerWorkspace } from "../hooks/useLecturerWorkspace";
-import { QRPanel } from "../components/QRPanel";
 
 export const LecturerDashboardPage = () => {
   const { token, user, logout } = useAuth();
   const { courses, selectedCourseId, setSelectedCourseId, error, setError } = useLecturerWorkspace(token);
   const [session, setSession] = useState(null);
   const [attendanceRows, setAttendanceRows] = useState([]);
-  const [availableStudents, setAvailableStudents] = useState([]);
-  const [studentSearch, setStudentSearch] = useState("");
-  const [addingStudent, setAddingStudent] = useState(false);
-  const [refreshingQr, setRefreshingQr] = useState(false);
+  const [showStartModal, setShowStartModal] = useState(false);
+  const [showStopModal, setShowStopModal] = useState(false);
+  const [startingSession, setStartingSession] = useState(false);
+  const [stoppingSession, setStoppingSession] = useState(false);
+  const [studentLimitInput, setStudentLimitInput] = useState("1");
 
   const selectedCourse = useMemo(
-    () => courses.find((c) => c._id === selectedCourseId) || null,
+    () => courses.find((course) => course._id === selectedCourseId) || null,
     [courses, selectedCourseId]
   );
 
   const loadAttendance = async (sessionId) => {
     const data = await apiRequest(`/attendance/session/${sessionId}`, { token });
     setAttendanceRows(data.rows);
+    setSession((current) => (
+      current && current.id === sessionId
+        ? {
+            ...current,
+            studentLimit: data.session?.studentLimit ?? current.studentLimit,
+            attendanceCount: data.rows.length,
+            qrAttendanceCount: data.rows.length
+          }
+        : current
+    ));
   };
 
   const loadSessions = async () => {
-    if (!selectedCourseId) { setSession(null); setAttendanceRows([]); return; }
+    if (!selectedCourseId) {
+      setSession(null);
+      setAttendanceRows([]);
+      return;
+    }
+
     try {
       const data = await apiRequest(`/session?courseId=${selectedCourseId}`, { token });
-      const active = data.find((e) => e.isActive) || null;
+      const active = data.find((entry) => entry.isActive) || null;
+
       if (active) {
-        const detail = await apiRequest(`/session/${active.id}/rotate`, { method: "POST", token });
-        setSession({ ...detail, id: active.id, isActive: true, qrAttendanceCount: detail.qrAttendanceCount ?? 0 });
+        setSession({
+          ...active,
+          attendanceCount: active.attendanceCount ?? 0,
+          qrAttendanceCount: active.attendanceCount ?? 0
+        });
         await loadAttendance(active.id);
       } else {
         setSession(null);
         setAttendanceRows([]);
       }
+
       setError("");
-    } catch (err) {
-      setError(err.message);
+    } catch (nextError) {
+      setError(nextError.message);
     }
   };
 
-  useEffect(() => { loadSessions(); }, [selectedCourseId, token]);
+  useEffect(() => {
+    loadSessions();
+  }, [selectedCourseId, token]);
 
   useEffect(() => {
     if (!token || !session?.id) return undefined;
+
     const socket = io(getApiUrl(), { auth: { token }, query: { sessionId: session.id } });
 
     socket.on("attendance:created", (payload) => {
-      setAttendanceRows((curr) => {
-        if (curr.some((r) => r.id === payload.id)) return curr;
-        return [{ id: payload.id, student: payload.student, timestamp: payload.timestamp }, ...curr];
+      setAttendanceRows((current) => {
+        if (current.some((row) => row.id === payload.id)) return current;
+        return [{ id: payload.id, student: payload.student, timestamp: payload.timestamp }, ...current];
       });
-      setSession((curr) => (curr ? { ...curr, qrAttendanceCount: payload.qrAttendanceCount ?? curr.qrAttendanceCount } : curr));
-    });
-    socket.on("attendance:deleted", (payload) => {
-      setAttendanceRows((curr) => curr.filter((r) => r.id !== payload.id));
-      setSession((curr) => (curr ? { ...curr, qrAttendanceCount: payload.qrAttendanceCount ?? curr.qrAttendanceCount } : curr));
-    });
-    socket.on("session:rotated", ({ expiresAt, token: nextToken, qrAttendanceCount }) => {
-      setSession((curr) => (
-        curr
+      setSession((current) => (
+        current
           ? {
-              ...curr,
-              expiresAt,
-              token: nextToken || curr.token,
-              qrAttendanceCount: qrAttendanceCount ?? 0
+              ...current,
+              attendanceCount: payload.attendanceCount ?? current.attendanceCount,
+              qrAttendanceCount: payload.qrAttendanceCount ?? payload.attendanceCount ?? current.qrAttendanceCount
             }
-          : curr
+          : current
       ));
     });
-    socket.on("session:stopped", () => { setSession(null); setAttendanceRows([]); });
+
+    socket.on("attendance:deleted", (payload) => {
+      setAttendanceRows((current) => current.filter((row) => row.id !== payload.id));
+      setSession((current) => (
+        current
+          ? {
+              ...current,
+              attendanceCount: payload.attendanceCount ?? current.attendanceCount,
+              qrAttendanceCount: payload.qrAttendanceCount ?? payload.attendanceCount ?? current.qrAttendanceCount
+            }
+          : current
+      ));
+    });
+
+    socket.on("session:stopped", () => {
+      setSession(null);
+      setAttendanceRows([]);
+    });
+
+    socket.on("session:deleted", () => {
+      setSession(null);
+      setAttendanceRows([]);
+    });
 
     return () => socket.disconnect();
   }, [token, session?.id]);
 
   const startSession = async () => {
-    if (!selectedCourseId) { setError("Select a course first."); return; }
+    if (!selectedCourseId) {
+      setError("Select a course first.");
+      return;
+    }
+
     try {
+      setStartingSession(true);
       const created = await apiRequest("/session/start", {
-        method: "POST", token,
-        body: { courseId: selectedCourseId }
+        method: "POST",
+        token,
+        body: {
+          courseId: selectedCourseId,
+          studentLimit: Number(studentLimitInput)
+        }
       });
-      setSession({ ...created, qrAttendanceCount: created.qrAttendanceCount ?? 0 });
+
+      setSession({
+        ...created,
+        attendanceCount: created.attendanceCount ?? 0,
+        qrAttendanceCount: created.qrAttendanceCount ?? created.attendanceCount ?? 0
+      });
       setAttendanceRows([]);
+      setShowStartModal(false);
       await loadAttendance(created.id);
       setError("");
-    } catch (err) {
-      setError(err.message);
+    } catch (nextError) {
+      setError(nextError.message);
+    } finally {
+      setStartingSession(false);
     }
   };
 
   const stopSession = async () => {
     if (!session?.id) return;
+
     try {
+      setStoppingSession(true);
       await apiRequest(`/session/${session.id}/stop`, { method: "POST", token });
       setSession(null);
       setAttendanceRows([]);
+      setShowStopModal(false);
       setError("");
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const refreshQr = async () => {
-    if (!session?.id) return;
-    try {
-      setRefreshingQr(true);
-      const refreshed = await apiRequest(`/session/${session.id}/rotate`, { method: "POST", token });
-      setSession((curr) => (curr ? { ...curr, ...refreshed, qrAttendanceCount: refreshed.qrAttendanceCount ?? 0 } : curr));
-      setError("");
-    } catch (err) {
-      setError(err.message);
+    } catch (nextError) {
+      setError(nextError.message);
     } finally {
-      setRefreshingQr(false);
+      setStoppingSession(false);
     }
   };
 
   const deleteAttendance = async (attendanceId) => {
     try {
       await apiRequest(`/attendance/${attendanceId}`, { method: "DELETE", token });
-      setAttendanceRows((curr) => curr.filter((row) => row.id !== attendanceId));
+      setAttendanceRows((current) => current.filter((row) => row.id !== attendanceId));
       setError("");
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const searchStudents = async (query) => {
-    setStudentSearch(query);
-    if (!session?.id) return;
-    if (!query.trim()) {
-      setAvailableStudents([]);
-      return;
-    }
-    try {
-      const data = await apiRequest(`/attendance/available/students?sessionId=${session.id}&searchQuery=${query}`, { token });
-      setAvailableStudents(data);
-    } catch (err) {
-      console.error("Failed to search students:", err);
-    }
-  };
-
-  const addStudentManually = async (studentId) => {
-    try {
-      setAddingStudent(true);
-      await apiRequest("/attendance/manual", {
-        method: "POST",
-        token,
-        body: { sessionId: session.id, studentId }
-      });
-      setStudentSearch("");
-      setAvailableStudents([]);
-      setError("");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setAddingStudent(false);
+    } catch (nextError) {
+      setError(nextError.message);
     }
   };
 
   return (
     <LecturerShell user={user} onLogout={logout} title="Live session">
-      {error && <div className="shell-banner shell-banner--error">{error}</div>}
+      {error ? <div className="shell-banner shell-banner--error">{error}</div> : null}
 
       <div className="page-dashboard">
-        {/* Toolbar */}
         <div className="dash-toolbar">
           <div className="field field--inline">
             <label className="field__label">Course</label>
             <select
               className="field__select"
               value={selectedCourseId}
-              onChange={(e) => setSelectedCourseId(e.target.value)}
+              onChange={(event) => setSelectedCourseId(event.target.value)}
             >
-              {courses.map((c) => (
-                <option key={c._id} value={c._id}>{c.courseCode} — {c.courseTitle}</option>
+              {courses.map((course) => (
+                <option key={course._id} value={course._id}>
+                  {course.courseCode} - {course.courseTitle}
+                </option>
               ))}
             </select>
           </div>
+
           <div className="dash-toolbar__right">
             <button
-              className={`btn ${session ? "btn--danger" : "btn--primary"}`}
-              onClick={session ? stopSession : startSession}
+              className={`btn ${session ? "btn-danger" : "btn-primary"}`}
+              type="button"
+              onClick={() => {
+                if (session) {
+                  setShowStopModal(true);
+                  return;
+                }
+
+                setStudentLimitInput(String(selectedCourse?.studentCount || 1));
+                setShowStartModal(true);
+              }}
             >
               {session ? "Stop session" : "Start session"}
             </button>
           </div>
         </div>
 
-        {/* Main grid */}
         <div className="dash-grid">
-          {/* QR panel */}
-          <QRPanel
-            session={session}
-            selectedCourse={selectedCourse}
-            onRefresh={refreshQr}
-            isRefreshing={refreshingQr}
-          />
+          <QRPanel session={session} selectedCourse={selectedCourse} />
 
-          {/* Attendance list */}
           <div className="pane pane--table">
             <div className="pane__head">
               <span className="pane__title">Check-ins</span>
-              <span className="badge">{attendanceRows.length}</span>
+              <span className="badge">
+                {session?.attendanceCount ?? attendanceRows.length}
+                {session?.studentLimit ? ` / ${session.studentLimit}` : ""}
+              </span>
             </div>
-            {session?.isActive && (
-              <div style={{ padding: "12px", borderBottom: "1px solid #e5e7eb", position: "relative" }}>
-                <label style={{ display: "block", marginBottom: "8px", fontSize: "12px", color: "#666" }}>
-                  Add student without phone
-                </label>
-                <div style={{ display: "flex", gap: "8px", position: "relative" }}>
-                  <input
-                    type="text"
-                    placeholder="Search by name or matric no..."
-                    value={studentSearch}
-                    onChange={(e) => searchStudents(e.target.value)}
-                    style={{
-                      flex: 1,
-                      padding: "8px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: "4px",
-                      fontSize: "14px"
-                    }}
-                  />
-                  {studentSearch && (
-                    <button
-                      onClick={() => {
-                        setStudentSearch("");
-                        setAvailableStudents([]);
-                      }}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "#999",
-                        fontSize: "18px",
-                        padding: "0 4px"
-                      }}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-                {availableStudents.length > 0 && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      right: 0,
-                      background: "white",
-                      border: "1px solid #d1d5db",
-                      borderTop: "none",
-                      maxHeight: "200px",
-                      overflowY: "auto",
-                      zIndex: 10,
-                      margin: "-1px 12px 0"
-                    }}
-                  >
-                    {availableStudents.map((student) => (
-                      <div
-                        key={student._id}
-                        style={{
-                          padding: "10px 12px",
-                          borderBottom: "1px solid #f3f4f6",
-                          cursor: "pointer",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center"
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = "#f9fafb";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = "transparent";
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontWeight: "500", fontSize: "14px" }}>{student.name}</div>
-                          <div style={{ fontSize: "12px", color: "#666" }}>{student.matricNo}</div>
-                        </div>
-                        <button
-                          onClick={() => addStudentManually(student._id)}
-                          disabled={addingStudent}
-                          style={{
-                            padding: "4px 8px",
-                            background: "#2563eb",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "4px",
-                            cursor: "pointer",
-                            fontSize: "12px"
-                          }}
-                        >
-                          {addingStudent ? "Adding..." : "Add"}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+
             <div className="table-wrap">
               <table className="att-table">
                 <thead>
@@ -325,6 +249,7 @@ export const LecturerDashboardPage = () => {
                       <td style={{ textAlign: "center" }}>
                         <button
                           className="icon-button"
+                          type="button"
                           onClick={() => deleteAttendance(row.id)}
                           title="Remove from attendance"
                           style={{
@@ -336,20 +261,50 @@ export const LecturerDashboardPage = () => {
                             padding: "4px"
                           }}
                         >
-                          ✕
+                          x
                         </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {attendanceRows.length === 0 && (
-                <p className="empty-hint">No check-ins yet.</p>
-              )}
+
+              {attendanceRows.length === 0 ? <p className="empty-hint">No check-ins yet.</p> : null}
             </div>
           </div>
         </div>
       </div>
+
+      <ActionModal
+        open={showStartModal}
+        title="Start session"
+        message="Enter how many students should be allowed to take attendance before this session closes to new scans."
+        confirmLabel="Start session"
+        onConfirm={startSession}
+        onCancel={() => setShowStartModal(false)}
+        confirmDisabled={!Number.isInteger(Number(studentLimitInput)) || Number(studentLimitInput) < 1}
+        busy={startingSession}
+      >
+        <label htmlFor="student-limit-input">Number of students</label>
+        <input
+          id="student-limit-input"
+          type="number"
+          min="1"
+          value={studentLimitInput}
+          onChange={(event) => setStudentLimitInput(event.target.value)}
+        />
+      </ActionModal>
+
+      <ActionModal
+        open={showStopModal}
+        title="End session"
+        message="End this session now? Students will no longer be able to scan this QR code."
+        confirmLabel="End session"
+        confirmVariant="danger"
+        onConfirm={stopSession}
+        onCancel={() => setShowStopModal(false)}
+        busy={stoppingSession}
+      />
     </LecturerShell>
   );
 };

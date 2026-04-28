@@ -1,13 +1,6 @@
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
-const RefreshIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-    <path d="M21 3v6h-6" />
-  </svg>
-);
-
 const MaximizeIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
@@ -20,12 +13,13 @@ const MinimizeIcon = () => (
   </svg>
 );
 
-export const QRPanel = ({ session, selectedCourse, onRefresh, isRefreshing }) => {
+export const QRPanel = ({ session, selectedCourse }) => {
   const [isMaximized, setIsMaximized] = useState(false);
   const qrPayload = session?.token
     ? JSON.stringify({ type: "attendance-session-token", token: session.token })
     : "";
-  const qrAttendanceCount = session?.qrAttendanceCount ?? 0;
+  const attendanceCount = session?.attendanceCount ?? 0;
+  const studentLimit = session?.studentLimit ?? 0;
 
   return (
     <>
@@ -37,14 +31,6 @@ export const QRPanel = ({ session, selectedCourse, onRefresh, isRefreshing }) =>
           </div>
           {session?.token && (
             <div className="qr-header-actions">
-              <button
-                className="qr-action-btn"
-                onClick={onRefresh}
-                title="Refresh QR"
-                disabled={isRefreshing}
-              >
-                <RefreshIcon />
-              </button>
               <button className="qr-action-btn" onClick={() => setIsMaximized(true)} title="Maximize">
                 <MaximizeIcon />
               </button>
@@ -67,7 +53,7 @@ export const QRPanel = ({ session, selectedCourse, onRefresh, isRefreshing }) =>
               <div className="qr-meta">
                 <span className="qr-meta__code">{selectedCourse?.courseCode}</span>
                 <span className="qr-meta__title">{selectedCourse?.courseTitle}</span>
-                <span className="qr-meta__limit">{qrAttendanceCount}/10 students on this QR</span>
+                <span className="qr-meta__limit">{attendanceCount}/{studentLimit} students recorded</span>
               </div>
             </>
           ) : (
@@ -102,7 +88,7 @@ export const QRPanel = ({ session, selectedCourse, onRefresh, isRefreshing }) =>
               <div className="qr-modal__info">
                 <div className="qr-modal__code">{selectedCourse?.courseCode}</div>
                 <div className="qr-modal__title">{selectedCourse?.courseTitle}</div>
-                <div className="qr-modal__title">{qrAttendanceCount}/10 students on this QR</div>
+                <div className="qr-modal__title">{attendanceCount}/{studentLimit} students recorded</div>
                 <div className="qr-modal__badge">
                   <span>Live</span> Session Active
                 </div>
