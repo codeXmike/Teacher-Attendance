@@ -21,3 +21,4 @@ export const createCourse = async (req, res) => {
 
   res.status(201).json(course);
 };
+

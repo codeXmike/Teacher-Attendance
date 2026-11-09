@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 import { createServer } from "http";
 import { env } from "./config/env.js";
 import { authRoutes } from "./routes/authRoutes.js";
+import { adminRoutes } from "./routes/adminRoutes.js";
 import { courseRoutes } from "./routes/courseRoutes.js";
 import { createSessionRoutes } from "./routes/sessionRoutes.js";
 import { createAttendanceRoutes } from "./routes/attendanceRoutes.js";
@@ -91,6 +92,7 @@ export const createApp = () => {
   });
 
   app.use("/auth", authRoutes);
+  app.use("/admin", adminRoutes);
   app.use("/courses", courseRoutes);
   app.use("/session", createSessionRoutes(io));
   app.use("/attendance", createAttendanceRoutes(io));

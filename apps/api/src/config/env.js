@@ -1,15 +1,19 @@
 import path from "path";
+import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// const rootEnvPath = path.resolve(__dirname, "../../../../.env");
-const rootEnvPath = path.resolve(__dirname, "../../.env");
+const apiEnvPath = path.resolve(__dirname, "../../.env");
+const sourceEnvPath = path.resolve(__dirname, "../.env");
+const envPath = process.env.ENV_FILE
+  ? path.resolve(process.env.ENV_FILE)
+  : [apiEnvPath, sourceEnvPath].find((candidate) => existsSync(candidate));
 
-dotenv.config({
-  path: process.env.ENV_FILE || rootEnvPath
-});
+// dotenv.config is synchronous, so all exported settings below are available
+// before server.js begins connecting to MongoDB.
+if (envPath) dotenv.config({ path: envPath });
 
 export const env = {
   port: Number(process.env.PORT || 4000),

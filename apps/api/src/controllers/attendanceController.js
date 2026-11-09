@@ -15,6 +15,7 @@ const getEffectiveStudentLimit = (session, attendanceCount = 0) => {
   return attendanceCount;
 };
 
+
 const normalizeScanToken = (input) => {
   if (input == null) {
     return "";

@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { Lecturer } from "../models/Lecturer.js";
 import { Student } from "../models/Student.js";
+import { Admin } from "../models/Admin.js";
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/errors.js";
 
@@ -83,6 +84,8 @@ export const register = async (req, res) => {
     });
   }
 
+  if (role === "admin") throw new HttpError(403, "Administrator accounts can only be created by an existing administrator");
+
   throw new HttpError(400, "Unsupported role");
 };
 
@@ -133,6 +136,13 @@ export const login = async (req, res) => {
         matricNo: student.matricNo,
       }
     });
+  }
+
+  if (role === "admin") {
+    const admin = await Admin.findOne({ email: (email || "").trim().toLowerCase() });
+    if (!admin || !(await bcrypt.compare(password, admin.passwordHash))) throw new HttpError(401, "Invalid credentials");
+    const token = signToken({ id: admin.id, role: "admin", name: admin.name, email: admin.email });
+    return res.json({ token, user: { id: admin.id, role: "admin", name: admin.name, email: admin.email } });
   }
 
   throw new HttpError(400, "Unsupported role");

@@ -28,6 +28,7 @@ const serializeSession = (session, token, attendanceCount = 0, qrAttendanceCount
   qrAttendanceCount
 });
 
+
 export const startSession = (io) => async (req, res) => {
   try {
     const { courseId, studentLimit } = req.body;

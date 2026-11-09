@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "admin:create": "node scripts/createAdmin.js",
     "build": "node -e \"console.log('API build step not required')\""
   },
   "dependencies": {
@@ -18,4 +19,3 @@
     "socket.io": "^4.8.1"
   }
 }
-
