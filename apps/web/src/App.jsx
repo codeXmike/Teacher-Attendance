@@ -9,11 +9,13 @@ import { LecturerRecordsPage } from "./pages/LecturerRecordsPage";
 import { StudentAuthPage } from "./pages/StudentAuthPage";
 import { StudentScanPage } from "./pages/StudentScanPage";
 import { LecturerSummaryPage } from "./pages/LecturerSummaryPage";
+import { ManagementPage } from "./pages/ManagementPage";
+import { AdminAuthPage } from "./pages/AdminAuthPage";
 
 const ProtectedRoute = ({ role, children }) => {
   const { user } = useAuth();
   if (!user) {
-    return <Navigate to={role === "lecturer" ? "/lecturer/auth" : "/student/auth"} replace />;
+    return <Navigate to={role === "lecturer" ? "/lecturer/auth" : role === "admin" ? "/admin/auth" : "/student/auth"} replace />;
   }
   if (user.role !== role) {
     return <Navigate to="/" replace />;
@@ -26,6 +28,7 @@ export default function App() {
     <ErrorBoundaryClass>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+
         <Route path="/lecturer/auth" element={<LecturerAuthPage />} />
         <Route
           path="/lecturer"
@@ -68,11 +71,20 @@ export default function App() {
           }
         />
         <Route path="/student/auth" element={<StudentAuthPage />} />
+        <Route path="/admin/auth" element={<AdminAuthPage />} />
         <Route
           path="/scan"
           element={
             <ProtectedRoute role="student">
               <StudentScanPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/management"
+          element={
+            <ProtectedRoute role="admin">
+              <ManagementPage />
             </ProtectedRoute>
           }
         />

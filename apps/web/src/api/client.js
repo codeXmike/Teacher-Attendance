@@ -1,4 +1,7 @@
-const API_URL = import.meta.env.VITE_API_URL || "https://teacher-attendance-api.onrender.com";
+const DEFAULT_API_URL = import.meta.env.DEV
+  ? "http://localhost:4000"
+  : "https://teacher-attendance-api.onrender.com";
+const API_URL = import.meta.env.VITE_API_URL || DEFAULT_API_URL;
 
 export const getApiUrl = () => API_URL;
 
@@ -19,3 +22,4 @@ export const apiRequest = async (path, { token, method = "GET", body } = {}) => 
 
   return payload;
 };
+

@@ -63,6 +63,7 @@ export const LandingPage = () => {
           <Link to="/student/auth" className="ghost-link">
             Student Access
           </Link>
+          <Link to="/admin/auth" className="ghost-link">Administrator</Link>
         </div>
       </div>
     </div>
